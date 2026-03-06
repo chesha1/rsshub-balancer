@@ -4,12 +4,15 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "lint": "biome check .",
+    "lint:fix": "biome check --fix ."
   },
   "dependencies": {
     "hono": "^4.12.5"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.6",
     "wrangler": "^4.4.0"
   }
 }
