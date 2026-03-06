@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { upstreams } from './config'
+import { config } from './config'
 
 const app = new Hono()
 
@@ -8,8 +8,9 @@ app.all('/*', async (c) => {
   const requestPath = url.pathname + url.search
 
   let selected: string | undefined
-  for (const upstream of upstreams) {
+  for (const upstream of config.upstreams) {
     try {
+      // https://github.com/DIYgod/RSSHub/pull/21300
       const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
       const check = await fetch(statusUrl)
       if (check.status === 200) {
@@ -22,7 +23,7 @@ app.all('/*', async (c) => {
   }
 
   if (!selected) {
-    selected = upstreams[0]
+    selected = config.fallbackUpstream
   }
 
   const res = await fetch(selected + requestPath, {
