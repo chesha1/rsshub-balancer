@@ -82,7 +82,7 @@ app.all('/*', async (c) => {
         body: requestBody,
       })
       console.log(`[fallback] ${upstream} -> ${res.status}`)
-      if (res.ok) {
+      if (res.ok || res.status === 304) {
         return new Response(res.body, {
           status: res.status,
           headers: res.headers,
