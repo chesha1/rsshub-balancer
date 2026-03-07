@@ -12,6 +12,4 @@ export const config = {
     'https://rsshub.99010101.xyz',
 
   ].map(trimSlash),
-  // 所有 upstream 均不可用时的兜底实例
-  fallbackUpstream: trimSlash('https://rsshub.99010101.xyz'),
 }
