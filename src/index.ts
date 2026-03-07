@@ -61,24 +61,19 @@ app.all('/*', async (c) => {
     selected = undefined
   }
 
-  // 有实例已缓存，直接请求
+  // 有实例已缓存，将其提到队首优先尝试
   if (selected) {
     console.log(`[cache-hit] ${selected}`)
-    const res = await fetch(selected + requestPath, {
-      method,
-      headers: c.req.raw.headers,
-      body: requestBody,
-    })
-    console.log(`[response] ${selected} -> ${res.status}`)
-    return new Response(res.body, {
-      status: res.status,
-      headers: res.headers,
-    })
+    const idx = orderedUpstreams.indexOf(selected)
+    if (idx > 0) {
+      orderedUpstreams.splice(idx, 1)
+      orderedUpstreams.unshift(selected)
+    }
+  } else {
+    console.log('[cache-miss] 所有上游均未缓存')
   }
 
-  console.log('[cache-miss] 所有上游均未缓存，依次尝试请求')
-
-  // 所有上游均未缓存时，依次请求直到成功
+  // 依次请求直到成功
   for (const upstream of orderedUpstreams) {
     try {
       const res = await fetch(upstream + requestPath, {
