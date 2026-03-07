@@ -1,4 +1,4 @@
-const trimSlash = (url: string) => url.replace(/\/+$/, '')
+import { trimSlash } from './utils'
 
 export const config = {
   upstreams: [
@@ -8,8 +8,8 @@ export const config = {
     'https://rsshub.umzzz.com',
     'https://rsshub.isrss.com',
     'https://rsshub.cups.moe',
-    'https://rsshub.umzzz.com',
     'https://rsshub.99010101.xyz',
-
   ].map(trimSlash),
+  /** 上游失败记录在 KV 中的过期时间（秒） */
+  failTtl: 600,
 }
