@@ -11,8 +11,14 @@ app.all('/*', async (c) => {
   const url = new URL(c.req.url)
   const requestPath = url.pathname + url.search
   const env = c.env
+  const method = c.req.method
+  // 原始请求体是一次性流，先缓冲下来才能安全地重试多个上游。
+  const requestBody =
+    method === 'GET' || method === 'HEAD'
+      ? undefined
+      : await c.req.raw.arrayBuffer()
 
-  console.log(`[request] ${c.req.method} ${requestPath}`)
+  console.log(`[request] ${method} ${requestPath}`)
 
   // 并行读取所有上游对当前路由的失败记录
   const failKeys = config.upstreams.map((u) => `fail:${u}|${url.pathname}`)
@@ -34,28 +40,34 @@ app.all('/*', async (c) => {
     `[order] healthy=${healthy.length} unhealthy=${unhealthy.length} order=${orderedUpstreams.map((u) => new URL(u).hostname).join(',')}`,
   )
 
-  // 遍历所有上游实例，通过 RSSHub 路由状态接口检测哪个实例已缓存该路由
+  // 并行检查所有上游实例的缓存状态
   let selected: string | undefined
-  for (const upstream of orderedUpstreams) {
-    try {
-      const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
-      const check = await fetch(statusUrl)
-      console.log(`[cache-check] ${upstream} -> ${check.status}`)
-      if (check.status === 200) {
-        selected = upstream
-        break
-      }
-    } catch (e) {
-      console.log(`[cache-check] ${upstream} -> error: ${e}`)
-    }
+  try {
+    selected = await Promise.any(
+      orderedUpstreams.map(async (upstream) => {
+        const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
+        try {
+          const check = await fetch(statusUrl)
+          console.log(`[cache-check] ${upstream} -> ${check.status}`)
+          if (check.status === 200) return upstream
+          throw new Error(`${check.status}`)
+        } catch (e) {
+          console.log(`[cache-check] ${upstream} -> error: ${e}`)
+          throw e
+        }
+      }),
+    )
+  } catch {
+    selected = undefined
   }
 
   // 有实例已缓存，直接请求
   if (selected) {
     console.log(`[cache-hit] ${selected}`)
     const res = await fetch(selected + requestPath, {
-      method: c.req.method,
+      method,
       headers: c.req.raw.headers,
+      body: requestBody,
     })
     console.log(`[response] ${selected} -> ${res.status}`)
     return new Response(res.body, {
@@ -70,8 +82,9 @@ app.all('/*', async (c) => {
   for (const upstream of orderedUpstreams) {
     try {
       const res = await fetch(upstream + requestPath, {
-        method: c.req.method,
+        method,
         headers: c.req.raw.headers,
+        body: requestBody,
       })
       console.log(`[fallback] ${upstream} -> ${res.status}`)
       if (res.ok) {
@@ -80,18 +93,14 @@ app.all('/*', async (c) => {
           headers: res.headers,
         })
       }
-      // 请求失败，异步写入 KV 失败记录
-      const failKey = `fail:${upstream}|${url.pathname}`
-      c.executionCtx.waitUntil(
-        env.KV.put(failKey, '1', { expirationTtl: config.failTtl }),
-      )
     } catch (e) {
       console.log(`[fallback] ${upstream} -> error: ${e}`)
-      const failKey = `fail:${upstream}|${url.pathname}`
-      c.executionCtx.waitUntil(
-        env.KV.put(failKey, '1', { expirationTtl: config.failTtl }),
-      )
     }
+    // 请求失败或异常，异步写入 KV 失败记录
+    const failKey = `fail:${upstream}|${url.pathname}`
+    c.executionCtx.waitUntil(
+      env.KV.put(failKey, '1', { expirationTtl: config.failTtl }),
+    )
   }
 
   // 所有实例均失败
