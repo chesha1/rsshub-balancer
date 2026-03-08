@@ -23,17 +23,11 @@ app.all('/*', async (c) => {
   // 并行读取所有上游对当前路由的失败记录
   const failKeys = config.upstreams.map((u) => `fail:${u}|${url.pathname}`)
   const failResults = await Promise.all(failKeys.map((key) => env.KV.get(key)))
+  const failedUpstreams = config.upstreams.filter((_, i) => failResults[i])
 
   // 分为 healthy / unhealthy 两组，各组内随机洗牌
-  const healthy: string[] = []
-  const unhealthy: string[] = []
-  for (let i = 0; i < config.upstreams.length; i++) {
-    if (failResults[i]) {
-      unhealthy.push(config.upstreams[i])
-    } else {
-      healthy.push(config.upstreams[i])
-    }
-  }
+  const healthy = config.upstreams.filter((u) => !failedUpstreams.includes(u))
+  const unhealthy = [...failedUpstreams]
   const orderedUpstreams = [...shuffle(healthy), ...shuffle(unhealthy)]
 
   console.log(
@@ -74,28 +68,37 @@ app.all('/*', async (c) => {
   }
 
   // 依次请求直到成功
-  for (const upstream of orderedUpstreams) {
+  for (const [index, upstream] of orderedUpstreams.entries()) {
+    const logTag =
+      selected && index === 0 && upstream === selected ? 'forward' : 'fallback'
     try {
       const res = await fetch(upstream + requestPath, {
         method,
+        // 保留上游 3xx 响应给客户端，避免 Worker 在内部自动跟随重定向并改变可见的 HTTP 语义。
+        redirect: 'manual',
+        // 在 Cloudflare Workers 中，子请求的 Host 由 fetch 目标 URL 决定，不会透传当前 Worker 的 Host。
         headers: c.req.raw.headers,
         body: requestBody,
       })
-      console.log(`[fallback] ${upstream} -> ${res.status}`)
-      if (res.ok || res.status === 304) {
+      console.log(`[${logTag}] ${upstream} -> ${res.status}`)
+      if (res.status >= 200 && res.status < 400) {
         return new Response(res.body, {
           status: res.status,
           headers: res.headers,
         })
       }
     } catch (e) {
-      console.log(`[fallback] ${upstream} -> error: ${e}`)
+      console.log(`[${logTag}] ${upstream} -> error: ${e}`)
     }
-    // 请求失败或异常，异步写入 KV 失败记录
-    const failKey = `fail:${upstream}|${url.pathname}`
-    c.executionCtx.waitUntil(
-      env.KV.put(failKey, '1', { expirationTtl: config.failTtl }),
-    )
+    // 仅在当前路由尚未标记该上游失败时才写入，减少重复 KV 写入。
+    // 这里故意不续期 TTL，让失败标记保持固定冷却窗，以进一步压低 KV 写入压力。
+    if (!failedUpstreams.includes(upstream)) {
+      failedUpstreams.push(upstream)
+      const failKey = `fail:${upstream}|${url.pathname}`
+      c.executionCtx.waitUntil(
+        env.KV.put(failKey, '1', { expirationTtl: config.failTtl }),
+      )
+    }
   }
 
   // 所有实例均失败
