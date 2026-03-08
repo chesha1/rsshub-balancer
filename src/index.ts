@@ -26,12 +26,16 @@ app.all('/*', async (c) => {
   const failedUpstreams = config.upstreams.filter((_, i) => failResults[i])
 
   // 分为 healthy / unhealthy 两组，各组内随机洗牌
-  const healthy = config.upstreams.filter((u) => !failedUpstreams.includes(u))
-  const unhealthy = [...failedUpstreams]
-  const orderedUpstreams = [...shuffle(healthy), ...shuffle(unhealthy)]
+  const healthyUpstreams = config.upstreams.filter(
+    (u) => !failedUpstreams.includes(u),
+  )
+  const orderedUpstreams = [
+    ...shuffle(healthyUpstreams),
+    ...shuffle(failedUpstreams),
+  ]
 
   console.log(
-    `[order] healthy=${healthy.length} unhealthy=${unhealthy.length} order=${orderedUpstreams.map((u) => new URL(u).hostname).join(',')}`,
+    `[order] healthy=${healthyUpstreams.length} unhealthy=${failedUpstreams.length} order=${orderedUpstreams.map((u) => new URL(u).hostname).join(',')}`,
   )
 
   // 并行检查所有上游实例的缓存状态
