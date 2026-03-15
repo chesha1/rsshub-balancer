@@ -82,6 +82,7 @@ app.all('/', (c) => {
 </body>
 </html>`)
 })
+app.get('/healthz', (c) => c.text('ok'))
 app.all('/logo.png', (c) => c.notFound())
 app.all('/favicon.ico', (c) => c.notFound())
 
