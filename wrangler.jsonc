@@ -9,6 +9,20 @@
       "id": "8038cf370b0648fd877bc505eeba8483"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DO",
+        "class_name": "RequestCoalescer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-add-request-coalescer",
+      "new_classes": ["RequestCoalescer"]
+    }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
