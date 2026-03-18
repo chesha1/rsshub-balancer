@@ -3,6 +3,13 @@
   "name": "rsshub-balancer",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-06",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "rsshub-balancer.virworks.moe",
+      "custom_domain": true
+    }
+  ],
   "kv_namespaces": [
     {
       "binding": "KV",
