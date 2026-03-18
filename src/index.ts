@@ -38,7 +38,7 @@ app.all('/', (c) => {
   <p>为多个 RSSHub 实例做负载均衡，复用缓存响应，减少重复抓取。</p>
 
   <h2>当前上游实例</h2>
-  <p>以下实例均来源于 <a href="https://docs.rsshub.app/guide/instances" target="_blank">RSSHub 文档中的公共实例列表</a>。</p>
+  <p>以下实例主要来源于 <a href="https://docs.rsshub.app/guide/instances" target="_blank">RSSHub 文档中的公共实例列表</a>，另包含一个由我维护的兜底实例。</p>
   <ul>
     ${raw(upstreamList)}
   </ul>
@@ -62,7 +62,7 @@ app.all('/', (c) => {
   <p>Load balancer for multiple RSSHub instances — reuses cached responses and reduces redundant fetching.</p>
 
   <h2>Current Upstreams</h2>
-  <p>All instances below are sourced from the <a href="https://docs.rsshub.app/guide/instances" target="_blank">public instance list in RSSHub docs</a>.</p>
+  <p>Most instances listed below come from the <a href="https://docs.rsshub.app/guide/instances" target="_blank">public instance list in the RSSHub documentation</a>, and include one additional self-maintained standby instance.</p>
   <ul>
     ${raw(upstreamList)}
   </ul>
