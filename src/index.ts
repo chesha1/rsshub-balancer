@@ -87,7 +87,22 @@ app.all('/', async (c) => {
 </body>
 </html>`)
 })
-app.get('/healthz', (c) => c.text('ok'))
+app.get('/healthz', async (c) => {
+  const upstreams = await getUpstreams(c.env.KV)
+  try {
+    await Promise.any(
+      upstreams.map(async (u) => {
+        const res = await fetch(`${u}/healthz`, {
+          signal: AbortSignal.timeout(5000),
+        })
+        if (!res.ok) throw new Error(`${res.status}`)
+      }),
+    )
+    return c.text('ok')
+  } catch {
+    return c.text('unhealthy', 503)
+  }
+})
 app.all('/logo.png', (c) => c.notFound())
 app.all('/favicon.ico', (c) => c.notFound())
 
