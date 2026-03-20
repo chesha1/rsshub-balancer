@@ -1,5 +1,37 @@
 import { config } from './config'
-import { shuffle } from './utils'
+import { shuffle, trimSlash } from './utils'
+
+// 从 GitHub 获取远程实例列表
+export async function fetchRemoteInstances(): Promise<string[]> {
+  const res = await fetch(
+    'https://raw.githubusercontent.com/RSSNext/rsshub-docs/main/.vitepress/theme/components/InstanceList.vue',
+  )
+  if (!res.ok) {
+    throw new Error(`fetch instances failed: ${res.status}`)
+  }
+  const text = await res.text()
+  const matches = text.matchAll(/url:\s*['"]([^'"]+)['"]/g)
+  const urls: string[] = []
+  for (const m of matches) {
+    urls.push(trimSlash(m[1]))
+  }
+  return urls
+}
+
+// 从 KV 读取实例列表；首次为空时写入 fallbackUpstreams 作为种子
+export async function getUpstreams(kv: KVNamespace): Promise<string[]> {
+  const raw = await kv.get('instances')
+  if (raw) {
+    try {
+      const list = JSON.parse(raw) as string[]
+      if (list.length > 0) return list
+    } catch {
+      // JSON 解析失败，回退
+    }
+  }
+  await kv.put('instances', JSON.stringify(config.fallbackUpstreams))
+  return config.fallbackUpstreams
+}
 
 // 按优先级依次尝试上游实例，返回首个成功响应；全部失败时返回 502
 export async function fetchFromUpstream(
@@ -8,6 +40,7 @@ export async function fetchFromUpstream(
   waitUntil: (p: Promise<unknown>) => void,
 ): Promise<Response> {
   try {
+    const upstreams = await getUpstreams(kv)
     const url = new URL(request.url)
     const requestPath = url.pathname + url.search
     const pathname = url.pathname
@@ -19,12 +52,12 @@ export async function fetchFromUpstream(
         ? await request.arrayBuffer()
         : undefined
     // 并行读取所有上游对当前路由的失败记录
-    const failKeys = config.upstreams.map((u) => `fail:${u}|${pathname}`)
+    const failKeys = upstreams.map((u) => `fail:${u}|${pathname}`)
     const failResults = await Promise.all(failKeys.map((key) => kv.get(key)))
-    const failedUpstreams = config.upstreams.filter((_, i) => failResults[i])
+    const failedUpstreams = upstreams.filter((_, i) => failResults[i])
 
     // 分为 healthy / unhealthy 两组，各组内随机洗牌
-    const healthyUpstreams = config.upstreams.filter(
+    const healthyUpstreams = upstreams.filter(
       (u) => !failedUpstreams.includes(u),
     )
     const orderedUpstreams = [

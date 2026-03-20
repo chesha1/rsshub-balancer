@@ -2,8 +2,12 @@ import { Hono } from 'hono'
 import { html, raw } from 'hono/html'
 import { config } from './config'
 import type { ResponseSnapshot } from './types'
-import { fetchFromUpstream } from './upstream'
-import { fromResponse, toResponse } from './utils'
+import {
+  fetchFromUpstream,
+  fetchRemoteInstances,
+  getUpstreams,
+} from './upstream'
+import { fromResponse, toResponse, trimSlash } from './utils'
 
 export { RequestCoalescer } from './coalescer'
 
@@ -12,8 +16,9 @@ export { RequestCoalescer } from './coalescer'
 const inflight = new Map<string, Promise<ResponseSnapshot>>()
 
 const app = new Hono<{ Bindings: CloudflareBindings }>()
-app.all('/', (c) => {
-  const upstreamList = config.upstreams
+app.all('/', async (c) => {
+  const upstreams = await getUpstreams(c.env.KV)
+  const upstreamList = upstreams
     .map((u) => `<li><a href="${u}" target="_blank">${u}</a></li>`)
     .join('\n')
   return c.html(html`<!doctype html>
@@ -38,7 +43,7 @@ app.all('/', (c) => {
   <p>为多个 RSSHub 实例做负载均衡，复用缓存响应，减少重复抓取。</p>
 
   <h2>当前上游实例</h2>
-  <p>以下实例主要来源于 <a href="https://docs.rsshub.app/guide/instances" target="_blank">RSSHub 文档中的公共实例列表</a>，另包含一个由我维护的兜底实例。</p>
+  <p>以下实例自动从 <a href="https://docs.rsshub.app/guide/instances" target="_blank">RSSHub 官方文档</a>同步，另包含一个自维护的兜底实例。</p>
   <ul>
     ${raw(upstreamList)}
   </ul>
@@ -62,7 +67,7 @@ app.all('/', (c) => {
   <p>Load balancer for multiple RSSHub instances — reuses cached responses and reduces redundant fetching.</p>
 
   <h2>Current Upstreams</h2>
-  <p>Most instances listed below come from the <a href="https://docs.rsshub.app/guide/instances" target="_blank">public instance list in the RSSHub documentation</a>, and include one additional self-maintained standby instance.</p>
+  <p>Instances below are automatically synced from the <a href="https://docs.rsshub.app/guide/instances" target="_blank">official RSSHub documentation</a>, plus one self-maintained standby instance.</p>
   <ul>
     ${raw(upstreamList)}
   </ul>
@@ -125,4 +130,44 @@ app.all('/*', async (c) => {
   return toResponse(await promise)
 })
 
-export default app
+export default {
+  fetch: app.fetch.bind(app),
+  async scheduled(
+    _event: ScheduledEvent,
+    env: CloudflareBindings,
+    _ctx: ExecutionContext,
+  ) {
+    try {
+      const remote = await fetchRemoteInstances()
+      // 与 fallback 合并去重
+      const merged = [
+        ...new Set([...remote.map(trimSlash), ...config.fallbackUpstreams]),
+      ]
+      // 并行健康检查，只保留可用实例
+      const checks = await Promise.all(
+        merged.map(async (u) => {
+          try {
+            const res = await fetch(`${u}/healthz`, {
+              signal: AbortSignal.timeout(5000),
+            })
+            return res.ok
+          } catch {
+            return false
+          }
+        }),
+      )
+      const healthy = merged.filter((_, i) => checks[i])
+      console.log(
+        `[scheduled] 健康检查: ${healthy.length}/${merged.length} 可用`,
+      )
+      if (healthy.length === 0) {
+        console.warn('[scheduled] 所有实例均不可用，保留 KV 中已有数据')
+        return
+      }
+      await env.KV.put('instances', JSON.stringify(healthy))
+      console.log(`[scheduled] 实例列表已更新，共 ${healthy.length} 个实例`)
+    } catch (e) {
+      console.warn(`[scheduled] 获取远程实例失败，保留 KV 中已有数据: ${e}`)
+    }
+  },
+}

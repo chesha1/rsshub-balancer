@@ -31,13 +31,13 @@ RSSHub Balancer —— 为多个 RSSHub 实例做负载均衡，复用缓存响�
 
 ## 架构
 
-- `src/index.ts` — 主入口，导出 Hono app 及 `RequestCoalescer` DO class。通配路由 `/*` 处理所有请求
+- `src/index.ts` — 主入口，导出 Hono app 及 `RequestCoalescer` DO class。通配路由 `/*` 处理所有请求；`scheduled` 处理器每小时（`0 * * * *`）从 GitHub 同步上游实例列表，健康检查后写入 KV `instances` 键
 - `src/coalescer.ts` — `RequestCoalescer` Durable Object，跨 isolate 的请求合并层
 - `src/upstream.ts` — 上游选择与请求转发逻辑（缓存检查、健康分组、顺序回退）
 - `src/types.ts` — 共享类型定义（`ResponseSnapshot`）
 - `src/config.ts` — 上游 RSSHub 实例列表及 `failTtl` 等参数
 - `src/utils.ts` — 共享工具函数（`trimSlash`、`shuffle`、`fromResponse`、`toResponse`）
-- `wrangler.jsonc` — Cloudflare Worker 配置，KV 绑定名为 `KV`，Durable Object 绑定名为 `DO`（通过 `env.KV`、`env.DO` 访问）
+- `wrangler.jsonc` — Cloudflare Worker 配置，KV 绑定名为 `KV`，Durable Object 绑定名为 `DO`（通过 `env.KV`、`env.DO` 访问）。KV 中存储两类数据：`instances`（JSON 数组，健康的上游 URL 列表）和 `fail:<upstream>|<pathname>`（单条上游对特定路由的失败标记，TTL 由 `config.failTtl` 控制）
 
 > 项目当前没有测试框架，也没有测试用例。
 
