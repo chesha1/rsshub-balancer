@@ -103,6 +103,34 @@ app.get('/healthz', async (c) => {
     return c.text('unhealthy', 503)
   }
 })
+// /api/route/status 是元数据查询接口，不走通用转发逻辑：
+// 1. 无需缓存检查（本身就是缓存检查）
+// 2. 非 200 响应（"未缓存"）是正常结果，不应视为上游失败
+app.get('/api/route/status', async (c) => {
+  const requestPath = c.req.query('requestPath')
+  if (!requestPath) {
+    return c.text('Missing requestPath parameter', 400)
+  }
+
+  const upstreams = await getUpstreams(c.env.KV)
+  try {
+    return await Promise.any(
+      upstreams.map(async (upstream) => {
+        const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
+        const res = await fetch(statusUrl, {
+          signal: AbortSignal.timeout(5000),
+        })
+        if (res.status === 200) return res
+        throw new Error(`${res.status}`)
+      }),
+    )
+  } catch {
+    return c.json({ cached: false, lastBuildDate: null }, 404)
+  }
+})
+
+app.all('/.well-known/*', (c) => c.notFound())
+app.all('/cdn-cgi/*', (c) => c.notFound())
 app.all('/logo.png', (c) => c.notFound())
 app.all('/favicon.ico', (c) => c.notFound())
 
