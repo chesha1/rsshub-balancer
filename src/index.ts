@@ -66,6 +66,7 @@ app.all('/.well-known/*', (c) => c.notFound())
 app.all('/cdn-cgi/*', (c) => c.notFound())
 app.all('/logo.png', (c) => c.notFound())
 app.all('/favicon.ico', (c) => c.notFound())
+app.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /'))
 
 app.all('/*', async (c) => {
   const url = new URL(c.req.url)
