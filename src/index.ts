@@ -125,6 +125,7 @@ export default {
           try {
             const res = await fetch(`${u}/healthz`, {
               signal: AbortSignal.timeout(5000),
+              redirect: 'manual',
             })
             return res.ok
           } catch {
