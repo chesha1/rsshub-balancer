@@ -62,6 +62,10 @@ app.get('/api/route/status', async (c) => {
   }
 })
 
+// TODO: /metrics 后续考虑聚合上游 OpenTelemetry 指标
+app.all('/metrics', (c) => c.notFound())
+app.all('/api/*', (c) => c.notFound())
+
 app.all('/.well-known/*', (c) => c.notFound())
 app.all('/cdn-cgi/*', (c) => c.notFound())
 app.all('/logo.png', (c) => c.notFound())
