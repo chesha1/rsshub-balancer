@@ -130,9 +130,9 @@ export async function fetchFromUpstream(
       }
     }
 
-    // 所有实例均失败
-    console.error('[error] 所有上游均不可用，返回 502')
-    return new Response('All upstreams are unavailable', {
+    // 当前请求未被任何上游成功处理
+    console.error('[error] 当前请求未被任何上游成功处理，返回 502')
+    return new Response('All upstreams failed to handle this request', {
       status: 502,
       headers: { 'content-type': 'text/plain; charset=UTF-8' },
     })
