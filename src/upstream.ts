@@ -76,7 +76,9 @@ export async function fetchFromUpstream(
         orderedUpstreams.map(async (upstream) => {
           const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
           try {
-            const check = await fetch(statusUrl)
+            const check = await fetch(statusUrl, {
+              signal: AbortSignal.timeout(5000),
+            })
             console.log(`[cache-check] ${upstream} -> ${check.status}`)
             if (check.status === 200) return upstream
             throw new Error(`${check.status}`)
@@ -114,6 +116,7 @@ export async function fetchFromUpstream(
           redirect: 'manual',
           headers,
           body,
+          signal: AbortSignal.timeout(15000),
         })
         console.log(`[${logTag}] ${upstream} -> ${res.status}`)
         if (res.status >= 200 && res.status < 400) {
