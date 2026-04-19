@@ -1,4 +1,11 @@
 import { config } from './config'
+import {
+  bindRequestLogger,
+  errorProps,
+  upstreamHost,
+  upstreamLogger,
+  withRequestId,
+} from './log'
 import { shuffle, trimSlash } from './utils'
 
 // 从 GitHub 获取远程实例列表
@@ -38,18 +45,22 @@ export async function fetchFromUpstream(
   request: Request,
   kv: KVNamespace,
   waitUntil: (p: Promise<unknown>) => void,
+  requestId: string,
 ): Promise<Response> {
+  const tracedRequest = withRequestId(request, requestId)
+  const logger = bindRequestLogger(upstreamLogger, requestId, tracedRequest)
+  const startedAt = Date.now()
   try {
     const upstreams = await getUpstreams(kv)
-    const url = new URL(request.url)
+    const url = new URL(tracedRequest.url)
     const requestPath = url.pathname + url.search
     const pathname = url.pathname
-    const method = request.method
-    const headers = request.headers
+    const method = tracedRequest.method
+    const headers = tracedRequest.headers
     // 非幂等请求需要缓冲 body 以支持顺序重试
     const body =
       method !== 'GET' && method !== 'HEAD'
-        ? await request.arrayBuffer()
+        ? await tracedRequest.arrayBuffer()
         : undefined
     // 并行读取所有上游对当前路由的失败记录
     const failKeys = upstreams.map((u) => `fail:${u}|${pathname}`)
@@ -65,10 +76,6 @@ export async function fetchFromUpstream(
       ...shuffle(failedUpstreams),
     ]
 
-    console.log(
-      `[order] healthy=${healthyUpstreams.length} unhealthy=${failedUpstreams.length} order=${orderedUpstreams.map((u) => new URL(u).hostname).join(',')}`,
-    )
-
     // 并行检查所有上游实例的缓存状态
     let selected: string | undefined
     try {
@@ -79,11 +86,21 @@ export async function fetchFromUpstream(
             const check = await fetch(statusUrl, {
               signal: AbortSignal.timeout(5000),
             })
-            console.log(`[cache-check] ${upstream} -> ${check.status}`)
+            logger.debug('upstream cache probe finished', {
+              event: 'upstream.cache_probe',
+              upstreamHost: upstreamHost(upstream),
+              status: check.status,
+              cached: check.status === 200,
+            })
             if (check.status === 200) return upstream
             throw new Error(`${check.status}`)
           } catch (e) {
-            console.log(`[cache-check] ${upstream} -> error: ${e}`)
+            logger.debug('upstream cache probe errored', {
+              event: 'upstream.cache_probe',
+              upstreamHost: upstreamHost(upstream),
+              cached: false,
+              ...errorProps(e),
+            })
             throw e
           }
         }),
@@ -92,21 +109,26 @@ export async function fetchFromUpstream(
       selected = undefined
     }
 
-    // 有实例已缓存，将其提到队首优先尝试
+    logger.info('upstream selection computed', {
+      event: 'upstream.selection',
+      healthyUpstreamCount: healthyUpstreams.length,
+      failedUpstreamCount: failedUpstreams.length,
+      orderedUpstreamHosts: orderedUpstreams.map(upstreamHost),
+      cacheHit: Boolean(selected),
+      selectedUpstreamHost: selected ? upstreamHost(selected) : undefined,
+    })
+
     if (selected) {
-      console.log(`[cache-hit] ${selected}`)
       const idx = orderedUpstreams.indexOf(selected)
       if (idx > 0) {
         orderedUpstreams.splice(idx, 1)
         orderedUpstreams.unshift(selected)
       }
-    } else {
-      console.log('[cache-miss] 所有上游均未缓存')
     }
 
     // 依次请求直到成功
     for (const [index, upstream] of orderedUpstreams.entries()) {
-      const logTag =
+      const attemptKind =
         selected && index === 0 && upstream === selected
           ? 'forward'
           : 'fallback'
@@ -118,12 +140,32 @@ export async function fetchFromUpstream(
           body,
           signal: AbortSignal.timeout(15000),
         })
-        console.log(`[${logTag}] ${upstream} -> ${res.status}`)
+        logger.debug('upstream attempt completed', {
+          event: 'upstream.attempt',
+          upstreamHost: upstreamHost(upstream),
+          attempt: index + 1,
+          attemptKind,
+          status: res.status,
+        })
         if (res.status >= 200 && res.status < 400) {
+          logger.info('request handled by upstream', {
+            event: 'upstream.success',
+            upstreamHost: upstreamHost(upstream),
+            attempt: index + 1,
+            attemptKind,
+            status: res.status,
+            durationMs: Date.now() - startedAt,
+          })
           return res
         }
       } catch (e) {
-        console.log(`[${logTag}] ${upstream} -> error: ${e}`)
+        logger.debug('upstream attempt errored', {
+          event: 'upstream.attempt',
+          upstreamHost: upstreamHost(upstream),
+          attempt: index + 1,
+          attemptKind,
+          ...errorProps(e),
+        })
       }
       // 仅在当前路由尚未标记该上游失败时才写入，减少重复 KV 写入。
       if (!failedUpstreams.includes(upstream)) {
@@ -134,13 +176,23 @@ export async function fetchFromUpstream(
     }
 
     // 当前请求未被任何上游成功处理
-    console.error('[error] 当前请求未被任何上游成功处理，返回 502')
+    logger.error('all upstreams failed to handle request', {
+      event: 'request.failed',
+      status: 502,
+      attemptedUpstreamHosts: orderedUpstreams.map(upstreamHost),
+      durationMs: Date.now() - startedAt,
+    })
     return new Response('All upstreams failed to handle this request', {
       status: 502,
       headers: { 'content-type': 'text/plain; charset=UTF-8' },
     })
   } catch (e) {
-    console.error(`[error] fetchFromUpstream 意外异常: ${e}`)
+    logger.error('fetchFromUpstream raised an unexpected error', {
+      event: 'request.failed',
+      status: 502,
+      durationMs: Date.now() - startedAt,
+      ...errorProps(e),
+    })
     return new Response('Internal error', {
       status: 502,
       headers: { 'content-type': 'text/plain; charset=UTF-8' },

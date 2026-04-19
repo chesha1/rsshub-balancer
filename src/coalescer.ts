@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { bindRequestLogger, coalescerLogger } from './log'
 import type { ResponseSnapshot } from './types'
 import { fetchFromUpstream } from './upstream'
 import { fromResponse } from './utils'
@@ -8,17 +9,30 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
   // 跨 isolate 的同路径并发 GET 请求在此合并，leader 完成后条目自动清除。
   private inflight = new Map<string, Promise<ResponseSnapshot>>()
 
-  async coalesce(request: Request): Promise<ResponseSnapshot> {
+  async coalesce(
+    request: Request,
+    requestId: string,
+  ): Promise<ResponseSnapshot> {
+    const logger = bindRequestLogger(coalescerLogger, requestId, request)
     const url = new URL(request.url)
     const requestPath = url.pathname + url.search
 
     let promise = this.inflight.get(requestPath)
     if (promise) {
-      console.log(`[do-coalesce] follower ${requestPath}`)
+      logger.debug('durable object coalescer joined an inflight request', {
+        event: 'coalesce.join',
+        coalesceRole: 'do-follower',
+      })
     } else {
-      console.log(`[do-coalesce] leader ${requestPath}`)
-      promise = fetchFromUpstream(request, this.env.KV, (p) =>
-        this.ctx.waitUntil(p),
+      logger.debug('durable object coalescer is leading a request', {
+        event: 'coalesce.join',
+        coalesceRole: 'do-leader',
+      })
+      promise = fetchFromUpstream(
+        request,
+        this.env.KV,
+        (p) => this.ctx.waitUntil(p),
+        requestId,
       )
         .then((res) => fromResponse(res))
         .finally(() => this.inflight.delete(requestPath))

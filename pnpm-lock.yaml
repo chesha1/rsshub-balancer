@@ -8,9 +8,18 @@ importers:
 
   .:
     dependencies:
+      '@logtape/hono':
+        specifier: ^2.0.5
+        version: 2.0.5(@logtape/logtape@2.0.5)(hono@4.12.8)
+      '@logtape/logtape':
+        specifier: ^2.0.5
+        version: 2.0.5
       hono:
         specifier: ^4.12.8
         version: 4.12.8
+      uuid:
+        specifier: ^13.0.0
+        version: 13.0.0
     devDependencies:
       '@biomejs/biome':
         specifier: 2.4.8
@@ -450,6 +459,15 @@ packages:
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
 
+  '@logtape/hono@2.0.5':
+    resolution: {integrity: sha512-1cFybsNPBUxi+d63vJZhXHBoYebiONBowLR3Pjg6EQUnzRPc7XihCTyJvbbWn+vEQ8ShRRQ9Hdrffagpa7m7PA==}
+    peerDependencies:
+      '@logtape/logtape': ^2.0.5
+      hono: ^4.0.0
+
+  '@logtape/logtape@2.0.5':
+    resolution: {integrity: sha512-UizDkh20ZPJVOddRxG1F77WhHdlNl/sbQgoO8T534R7XvUBMAJ9En9f35u+meW2tRsNLvjz6R87Zanwf53tspQ==}
+
   '@poppinss/colors@4.1.6':
     resolution: {integrity: sha512-H9xkIdFswbS8n1d6vmRd8+c10t2Qe+rZITbbDHHkQixH5+2x1FDGmi/0K+WgWiqQFKPSlIYB7jlH6Kpfn6Fleg==}
 
@@ -536,6 +554,10 @@ packages:
 
   unenv@2.0.0-rc.24:
     resolution: {integrity: sha512-i7qRCmY42zmCwnYlh9H2SvLEypEFGye5iRmEMKjcGi7zk9UquigRjFtTLz0TYqr0ZGLZhaMHl/foy1bZR+Cwlw==}
+
+  uuid@13.0.0:
+    resolution: {integrity: sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w==}
+    hasBin: true
 
   workerd@1.20260317.1:
     resolution: {integrity: sha512-ZuEq1OdrJBS+NV+L5HMYPCzVn49a2O60slQiiLpG44jqtlOo+S167fWC76kEXteXLLLydeuRrluRel7WdOUa4g==}
@@ -822,6 +844,13 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
+  '@logtape/hono@2.0.5(@logtape/logtape@2.0.5)(hono@4.12.8)':
+    dependencies:
+      '@logtape/logtape': 2.0.5
+      hono: 4.12.8
+
+  '@logtape/logtape@2.0.5': {}
+
   '@poppinss/colors@4.1.6':
     dependencies:
       kleur: 4.1.5
@@ -943,6 +972,8 @@ snapshots:
   unenv@2.0.0-rc.24:
     dependencies:
       pathe: 2.0.3
+
+  uuid@13.0.0: {}
 
   workerd@1.20260317.1:
     optionalDependencies:

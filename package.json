@@ -9,7 +9,10 @@
     "lint:fix": "biome check --fix ."
   },
   "dependencies": {
-    "hono": "^4.12.8"
+    "@logtape/hono": "^2.0.5",
+    "@logtape/logtape": "^2.0.5",
+    "hono": "^4.12.8",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.8",
