@@ -16,29 +16,45 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
     const logger = bindRequestLogger(coalescerLogger, requestId, request)
     const url = new URL(request.url)
     const requestPath = url.pathname + url.search
+    const startedAt = Date.now()
 
     let promise = this.inflight.get(requestPath)
+    let coalesceRole: 'do-leader' | 'do-follower'
     if (promise) {
+      coalesceRole = 'do-follower'
       logger.debug('durable object coalescer joined an inflight request', {
         event: 'coalesce.join',
-        coalesceRole: 'do-follower',
+        coalesceRole,
       })
     } else {
+      coalesceRole = 'do-leader'
       logger.debug('durable object coalescer is leading a request', {
         event: 'coalesce.join',
-        coalesceRole: 'do-leader',
+        coalesceRole,
       })
-      promise = fetchFromUpstream(
-        request,
-        this.env.KV,
-        (p) => this.ctx.waitUntil(p),
-        requestId,
-      )
-        .then((res) => fromResponse(res))
-        .finally(() => this.inflight.delete(requestPath))
+      promise = (async (): Promise<ResponseSnapshot> => {
+        try {
+          const res = await fetchFromUpstream(
+            request,
+            this.env.KV,
+            (p) => this.ctx.waitUntil(p),
+            requestId,
+          )
+          return await fromResponse(res)
+        } finally {
+          this.inflight.delete(requestPath)
+        }
+      })()
       this.inflight.set(requestPath, promise)
     }
 
-    return await promise
+    const snapshot = await promise
+    logger.info('durable object coalescing completed', {
+      event: 'coalesce.completed',
+      coalesceRole,
+      status: snapshot.status,
+      durationMs: Date.now() - startedAt,
+    })
+    return snapshot
   }
 }

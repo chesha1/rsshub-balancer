@@ -2,11 +2,23 @@ import { config } from './config'
 import {
   bindRequestLogger,
   errorProps,
-  upstreamHost,
   upstreamLogger,
   withRequestId,
+  withResponseRequestId,
 } from './log'
 import { shuffle, trimSlash } from './utils'
+
+// `forward` 表示当前尝试正好命中了缓存探测选出的上游；
+// `fallback` 表示没有命中缓存，或命中的上游失败后进入兜底重试。
+type UpstreamAttemptKind = 'forward' | 'fallback'
+
+type UpstreamPhase = 'prepare' | 'cache_probe' | 'fetch'
+
+type UpstreamLogContext = {
+  degradedToDirect?: boolean
+  degradeReason?: string
+  degradeError?: Record<string, unknown>
+}
 
 // 从 GitHub 获取远程实例列表
 export async function fetchRemoteInstances(): Promise<string[]> {
@@ -46,10 +58,28 @@ export async function fetchFromUpstream(
   kv: KVNamespace,
   waitUntil: (p: Promise<unknown>) => void,
   requestId: string,
+  logContext: UpstreamLogContext = {},
 ): Promise<Response> {
   const tracedRequest = withRequestId(request, requestId)
   const logger = bindRequestLogger(upstreamLogger, requestId, tracedRequest)
   const startedAt = Date.now()
+  let phase: UpstreamPhase = 'prepare'
+  let healthyUpstreamCount = 0
+  let failedUpstreamCount = 0
+  let probeCount = 0
+  let cacheHit = false
+  let attemptCount = 0
+  let forwardAttemptCount = 0
+  let fallbackAttemptCount = 0
+  const attemptedUpstreams: string[] = []
+  let finalAttemptKind: UpstreamAttemptKind | undefined
+  let selectedUpstreamHost: string | undefined
+  let finalUpstreamHost: string | undefined
+  let prepareDurationMs: number | undefined
+  let cacheProbeDurationMs: number | undefined
+  let fetchDurationMs: number | undefined
+  let cacheProbeStartedAt: number | undefined
+  let fetchStartedAt: number | undefined
   try {
     const upstreams = await getUpstreams(kv)
     const url = new URL(tracedRequest.url)
@@ -71,67 +101,70 @@ export async function fetchFromUpstream(
     const healthyUpstreams = upstreams.filter(
       (u) => !failedUpstreams.includes(u),
     )
+    healthyUpstreamCount = healthyUpstreams.length
+    failedUpstreamCount = failedUpstreams.length
     const orderedUpstreams = [
       ...shuffle(healthyUpstreams),
       ...shuffle(failedUpstreams),
     ]
 
-    // 并行检查所有上游实例的缓存状态
-    let selected: string | undefined
+    prepareDurationMs = Date.now() - startedAt
+    probeCount = orderedUpstreams.length
+    phase = 'cache_probe'
+    cacheProbeStartedAt = Date.now()
     try {
-      selected = await Promise.any(
+      selectedUpstreamHost = await Promise.any(
         orderedUpstreams.map(async (upstream) => {
           const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
-          try {
-            const check = await fetch(statusUrl, {
-              signal: AbortSignal.timeout(5000),
-            })
-            logger.debug('upstream cache probe finished', {
-              event: 'upstream.cache_probe',
-              upstreamHost: upstreamHost(upstream),
-              status: check.status,
-              cached: check.status === 200,
-            })
-            if (check.status === 200) return upstream
-            throw new Error(`${check.status}`)
-          } catch (e) {
-            logger.debug('upstream cache probe errored', {
-              event: 'upstream.cache_probe',
-              upstreamHost: upstreamHost(upstream),
-              cached: false,
-              ...errorProps(e),
-            })
-            throw e
-          }
+          const check = await fetch(statusUrl, {
+            signal: AbortSignal.timeout(5000),
+          })
+          if (check.status === 200) return upstream
+          throw new Error(`${check.status}`)
         }),
       )
     } catch {
-      selected = undefined
+      selectedUpstreamHost = undefined
     }
-
-    logger.info('upstream selection computed', {
-      event: 'upstream.selection',
-      healthyUpstreamCount: healthyUpstreams.length,
-      failedUpstreamCount: failedUpstreams.length,
-      orderedUpstreamHosts: orderedUpstreams.map(upstreamHost),
-      cacheHit: Boolean(selected),
-      selectedUpstreamHost: selected ? upstreamHost(selected) : undefined,
+    cacheProbeDurationMs = Date.now() - cacheProbeStartedAt
+    cacheHit = Boolean(selectedUpstreamHost)
+    // 缓存探测阶段只记录“是否命中”以及命中的候选上游，不再按实例逐条展开。
+    logger.info('upstream cache probe completed', {
+      event: 'upstream.cache_probe',
+      outcome: cacheHit ? 'hit' : 'miss',
+      cacheHit,
+      selectedUpstreamHost,
+      probeCount,
+      durationMs: cacheProbeDurationMs,
+      healthyUpstreamCount,
+      failedUpstreamCount,
     })
 
-    if (selected) {
-      const idx = orderedUpstreams.indexOf(selected)
+    if (selectedUpstreamHost) {
+      const idx = orderedUpstreams.indexOf(selectedUpstreamHost)
       if (idx > 0) {
         orderedUpstreams.splice(idx, 1)
-        orderedUpstreams.unshift(selected)
+        orderedUpstreams.unshift(selectedUpstreamHost)
       }
     }
 
     // 依次请求直到成功
+    phase = 'fetch'
+    fetchStartedAt = Date.now()
     for (const [index, upstream] of orderedUpstreams.entries()) {
       const attemptKind =
-        selected && index === 0 && upstream === selected
+        selectedUpstreamHost && index === 0 && upstream === selectedUpstreamHost
           ? 'forward'
           : 'fallback'
+      attemptCount += 1
+      finalAttemptKind = attemptKind
+      finalUpstreamHost = upstream
+      attemptedUpstreams.push(upstream)
+      if (attemptKind === 'forward') {
+        forwardAttemptCount += 1
+      } else {
+        fallbackAttemptCount += 1
+      }
       try {
         const res = await fetch(upstream + requestPath, {
           method,
@@ -140,33 +173,36 @@ export async function fetchFromUpstream(
           body,
           signal: AbortSignal.timeout(15000),
         })
-        logger.debug('upstream attempt completed', {
-          event: 'upstream.attempt',
-          upstreamHost: upstreamHost(upstream),
-          attempt: index + 1,
-          attemptKind,
-          status: res.status,
-        })
         if (res.status >= 200 && res.status < 400) {
-          logger.info('request handled by upstream', {
-            event: 'upstream.success',
-            upstreamHost: upstreamHost(upstream),
-            attempt: index + 1,
-            attemptKind,
+          fetchDurationMs = Date.now() - fetchStartedAt
+          logger.info('upstream fetch completed', {
+            event: 'upstream.fetch',
+            outcome:
+              finalAttemptKind === 'forward'
+                ? 'forward_succeeded'
+                : 'fallback_succeeded',
             status: res.status,
             durationMs: Date.now() - startedAt,
+            ...(prepareDurationMs !== undefined ? { prepareDurationMs } : {}),
+            ...(cacheProbeDurationMs !== undefined
+              ? { cacheProbeDurationMs }
+              : {}),
+            ...(fetchDurationMs !== undefined ? { fetchDurationMs } : {}),
+            attemptCount,
+            retryCount: Math.max(attemptCount - 1, 0),
+            forwardAttemptCount,
+            fallbackAttemptCount,
+            attemptedUpstreams,
+            finalAttemptKind,
+            cacheHit,
+            selectedUpstreamHost,
+            finalUpstreamHost,
+            fallbackUsed: fallbackAttemptCount > 0,
+            ...logContext,
           })
-          return res
+          return withResponseRequestId(res, requestId)
         }
-      } catch (e) {
-        logger.debug('upstream attempt errored', {
-          event: 'upstream.attempt',
-          upstreamHost: upstreamHost(upstream),
-          attempt: index + 1,
-          attemptKind,
-          ...errorProps(e),
-        })
-      }
+      } catch {}
       // 仅在当前路由尚未标记该上游失败时才写入，减少重复 KV 写入。
       if (!failedUpstreams.includes(upstream)) {
         failedUpstreams.push(upstream)
@@ -176,26 +212,73 @@ export async function fetchFromUpstream(
     }
 
     // 当前请求未被任何上游成功处理
-    logger.error('all upstreams failed to handle request', {
-      event: 'request.failed',
+    fetchDurationMs = Date.now() - fetchStartedAt
+    logger.error('upstream fetch failed', {
+      event: 'upstream.fetch',
+      outcome: 'all_failed',
       status: 502,
-      attemptedUpstreamHosts: orderedUpstreams.map(upstreamHost),
       durationMs: Date.now() - startedAt,
+      ...(prepareDurationMs !== undefined ? { prepareDurationMs } : {}),
+      ...(cacheProbeDurationMs !== undefined ? { cacheProbeDurationMs } : {}),
+      ...(fetchDurationMs !== undefined ? { fetchDurationMs } : {}),
+      attemptCount,
+      retryCount: Math.max(attemptCount - 1, 0),
+      forwardAttemptCount,
+      fallbackAttemptCount,
+      attemptedUpstreams,
+      finalAttemptKind,
+      cacheHit,
+      selectedUpstreamHost,
+      finalUpstreamHost,
+      fallbackUsed: fallbackAttemptCount > 0,
+      ...logContext,
     })
-    return new Response('All upstreams failed to handle this request', {
-      status: 502,
-      headers: { 'content-type': 'text/plain; charset=UTF-8' },
-    })
+    return withResponseRequestId(
+      new Response('All upstreams failed to handle this request', {
+        status: 502,
+        headers: { 'content-type': 'text/plain; charset=UTF-8' },
+      }),
+      requestId,
+    )
   } catch (e) {
-    logger.error('fetchFromUpstream raised an unexpected error', {
-      event: 'request.failed',
+    if (phase === 'prepare') {
+      prepareDurationMs = Date.now() - startedAt
+    } else if (phase === 'cache_probe' && cacheProbeStartedAt !== undefined) {
+      cacheProbeDurationMs = Date.now() - cacheProbeStartedAt
+    } else if (phase === 'fetch' && fetchStartedAt !== undefined) {
+      fetchDurationMs = Date.now() - fetchStartedAt
+    }
+    logger.error('upstream fetch raised an unexpected error', {
+      event: 'upstream.fetch',
+      outcome: 'error',
+      phase,
       status: 502,
       durationMs: Date.now() - startedAt,
+      ...(prepareDurationMs !== undefined ? { prepareDurationMs } : {}),
+      ...(cacheProbeDurationMs !== undefined ? { cacheProbeDurationMs } : {}),
+      ...(fetchDurationMs !== undefined ? { fetchDurationMs } : {}),
+      healthyUpstreamCount,
+      failedUpstreamCount,
+      probeCount,
+      cacheHit,
+      attemptCount,
+      retryCount: Math.max(attemptCount - 1, 0),
+      forwardAttemptCount,
+      fallbackAttemptCount,
+      attemptedUpstreams,
+      finalAttemptKind,
+      selectedUpstreamHost,
+      finalUpstreamHost,
+      ...logContext,
+      fallbackUsed: fallbackAttemptCount > 0,
       ...errorProps(e),
     })
-    return new Response('Internal error', {
-      status: 502,
-      headers: { 'content-type': 'text/plain; charset=UTF-8' },
-    })
+    return withResponseRequestId(
+      new Response('Internal error', {
+        status: 502,
+        headers: { 'content-type': 'text/plain; charset=UTF-8' },
+      }),
+      requestId,
+    )
   }
 }

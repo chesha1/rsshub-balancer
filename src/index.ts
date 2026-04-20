@@ -11,6 +11,7 @@ import {
   errorProps,
   httpLogger,
   REQUEST_ID_HEADER,
+  withResponseRequestId,
 } from './log'
 import type { ResponseSnapshot } from './types'
 import {
@@ -81,13 +82,13 @@ app.use(
   honoLogger({
     category: ['rsshub-balancer', 'http'],
     skip: (c) => shouldSkipAccessLog(c.req.path),
-    format: (c, responseTime) => ({
+    format: (c, durationMs) => ({
       event: 'http.request',
       requestId: c.res.headers.get(REQUEST_ID_HEADER) ?? undefined,
       method: c.req.method,
       path: c.req.path,
       status: c.res.status,
-      responseTime,
+      durationMs,
       contentLength: c.res.headers.get('content-length') ?? undefined,
       userAgent: c.req.header('user-agent') ?? undefined,
       referrer:
@@ -127,7 +128,7 @@ app.get('/api/route/status', async (c) => {
 
   const upstreams = await getUpstreams(c.env.KV)
   try {
-    return await Promise.any(
+    const response = await Promise.any(
       upstreams.map(async (upstream) => {
         const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
         const res = await fetch(statusUrl, {
@@ -137,6 +138,7 @@ app.get('/api/route/status', async (c) => {
         throw new Error(`${res.status}`)
       }),
     )
+    return withResponseRequestId(response, c.get('requestId'))
   } catch {
     return c.json({ cached: false, lastBuildDate: null }, 404)
   }
@@ -156,6 +158,7 @@ app.all('/*', async (c) => {
   const requestId = c.get('requestId')
   const logger = c.get('logger')
   const request = c.req.raw
+  const startedAt = Date.now()
 
   // 非 GET 请求不参与合并，直接转发上游并返回原始 Response
   if (method !== 'GET') {
@@ -174,41 +177,55 @@ app.all('/*', async (c) => {
   // DO / upstream 链路；后面如果要增强追踪，再把 external requestId 和
   // shared fetch/coalesce id 拆开建模。
   let promise = inflight.get(requestPath)
+  let coalesceRole: 'isolate-leader' | 'isolate-follower'
   if (promise) {
+    coalesceRole = 'isolate-follower'
     logger.debug('request joined an inflight isolate request', {
       event: 'coalesce.join',
-      coalesceRole: 'isolate-follower',
+      coalesceRole,
     })
   } else {
+    coalesceRole = 'isolate-leader'
     logger.debug('request is leading an isolate coalesced fetch', {
       event: 'coalesce.join',
-      coalesceRole: 'isolate-leader',
+      coalesceRole,
     })
     promise = (async (): Promise<ResponseSnapshot> => {
       try {
-        const id = c.env.DO.idFromName(requestPath)
-        const stub = c.env.DO.get(id)
-        return await stub.coalesce(request, requestId)
-      } catch (e) {
-        logger.warn('durable object RPC failed; degrading to direct upstream', {
-          event: 'request.degraded',
-          reason: 'do_rpc_failed',
-          ...errorProps(e),
-        })
-        const res = await fetchFromUpstream(
-          request,
-          c.env.KV,
-          // 降级直连上游时，仍然沿用同一个 waitUntil 提交后台任务。
-          (p) => c.executionCtx.waitUntil(p),
-          requestId,
-        )
-        return await fromResponse(res)
+        try {
+          const id = c.env.DO.idFromName(requestPath)
+          const stub = c.env.DO.get(id)
+          return await stub.coalesce(request, requestId)
+        } catch (e) {
+          const res = await fetchFromUpstream(
+            request,
+            c.env.KV,
+            // 降级直连上游时，仍然沿用同一个 waitUntil 提交后台任务。
+            (p) => c.executionCtx.waitUntil(p),
+            requestId,
+            {
+              degradedToDirect: true,
+              degradeReason: 'do_rpc_failed',
+              degradeError: errorProps(e),
+            },
+          )
+          return await fromResponse(res)
+        }
+      } finally {
+        inflight.delete(requestPath)
       }
-    })().finally(() => inflight.delete(requestPath))
+    })()
     inflight.set(requestPath, promise)
   }
 
-  return toResponse(await promise)
+  const snapshot = await promise
+  logger.info('isolate coalescing completed', {
+    event: 'coalesce.completed',
+    coalesceRole,
+    status: snapshot.status,
+    durationMs: Date.now() - startedAt,
+  })
+  return withResponseRequestId(toResponse(snapshot), requestId)
 })
 
 export default {

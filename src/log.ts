@@ -65,6 +65,10 @@ function formatMessage(parts: readonly unknown[]): string {
   return parts.map(formatMessagePart).join('')
 }
 
+// 耗时字段统一约定：
+// 1. `durationMs` 只表示当前日志事件范围内的总墙钟耗时；
+// 2. 分阶段耗时统一命名为 `{phase}DurationMs`；
+// 3. 未进入的阶段不写 `0`，而是直接省略对应字段。
 // Cloudflare 更适合直接消费结构化对象，因此这里把 LogTape record 展平成单个 JSON payload。
 function formatRecord(record: LogRecord): Record<string, unknown> {
   return {
@@ -87,7 +91,7 @@ configureSync({
     {
       category: ['rsshub-balancer'],
       sinks: ['console'],
-      lowestLevel: 'debug',
+      lowestLevel: 'info',
     },
     {
       category: ['logtape'],
@@ -128,6 +132,20 @@ export function withRequestId(request: Request, requestId: string): Request {
   return new Request(request, { headers })
 }
 
+// 给原生 Response 显式补上 X-Request-Id，保证直接返回 Response 的路径也能把请求 ID 回给客户端。
+export function withResponseRequestId(
+  response: Response,
+  requestId: string,
+): Response {
+  const headers = new Headers(response.headers)
+  headers.set(REQUEST_ID_HEADER, requestId)
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
+
 export function getRequestId(request: Request): string | null {
   return request.headers.get(REQUEST_ID_HEADER)
 }
@@ -144,14 +162,5 @@ export function errorProps(error: unknown): Record<string, unknown> {
       typeof error === 'function'
         ? String(error)
         : error,
-  }
-}
-
-// 上游日志里只保留 hostname，避免整条 URL 带来噪音和高基数字段。
-export function upstreamHost(upstream: string): string {
-  try {
-    return new URL(upstream).hostname
-  } catch {
-    return upstream
   }
 }
