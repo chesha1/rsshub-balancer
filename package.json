@@ -11,11 +11,13 @@
   "dependencies": {
     "@logtape/hono": "^2.0.5",
     "@logtape/logtape": "^2.0.5",
+    "@redis/client": "^5.12.1",
     "hono": "^4.12.14",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.12",
+    "@types/node": "^25.6.0",
     "typescript": "^6.0.3",
     "wrangler": "^4.83.0"
   }

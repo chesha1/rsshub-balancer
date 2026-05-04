@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { bindRequestLogger, coalescerLogger } from './log'
 import { recordMetric } from './metrics'
+import { createStateStore } from './store'
 import type { ResponseSnapshot } from './types'
 import { fetchFromUpstream } from './upstream'
 import { fromResponse } from './utils'
@@ -37,7 +38,7 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
         try {
           const res = await fetchFromUpstream(
             request,
-            this.env.KV,
+            createStateStore(this.env),
             (p) => this.ctx.waitUntil(p),
             requestId,
           )

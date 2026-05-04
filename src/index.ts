@@ -14,6 +14,7 @@ import {
   withResponseRequestId,
 } from './log'
 import { recordMetric } from './metrics'
+import { createStateStore } from './store'
 import type { ResponseSnapshot } from './types'
 import {
   fetchFromUpstream,
@@ -99,11 +100,11 @@ app.use(
 )
 
 app.all('/', async (c) => {
-  const upstreams = await getUpstreams(c.env.KV)
+  const upstreams = await getUpstreams(createStateStore(c.env))
   return c.html(renderHome(upstreams))
 })
 app.get('/healthz', async (c) => {
-  const upstreams = await getUpstreams(c.env.KV)
+  const upstreams = await getUpstreams(createStateStore(c.env))
   try {
     await Promise.any(
       upstreams.map(async (u) => {
@@ -127,7 +128,7 @@ app.get('/api/route/status', async (c) => {
     return c.text('Missing requestPath parameter', 400)
   }
 
-  const upstreams = await getUpstreams(c.env.KV)
+  const upstreams = await getUpstreams(createStateStore(c.env))
   try {
     const response = await Promise.any(
       upstreams.map(async (upstream) => {
@@ -160,12 +161,13 @@ app.all('/*', async (c) => {
   const logger = c.get('logger')
   const request = c.req.raw
   const startedAt = Date.now()
+  const stateStore = createStateStore(c.env)
 
   // 非 GET 请求不参与合并，直接转发上游并返回原始 Response
   if (method !== 'GET') {
     const res = await fetchFromUpstream(
       request,
-      c.env.KV,
+      stateStore,
       // 把失败标记等后台写入交给 waitUntil，避免阻塞当前响应。
       (p) => c.executionCtx.waitUntil(p),
       requestId,
@@ -217,7 +219,7 @@ app.all('/*', async (c) => {
         } catch (e) {
           const res = await fetchFromUpstream(
             request,
-            c.env.KV,
+            stateStore,
             // 降级直连上游时，仍然沿用同一个 waitUntil 提交后台任务。
             (p) => c.executionCtx.waitUntil(p),
             requestId,
@@ -295,15 +297,11 @@ export default {
   ) {
     const startedAt = Date.now()
     let previous: string[] = []
+    const stateStore = createStateStore(env)
     try {
-      const raw = await env.KV.get('instances')
-      if (raw) {
-        try {
-          previous = JSON.parse(raw) as string[]
-        } catch {
-          previous = []
-        }
-      }
+      try {
+        previous = (await stateStore.getInstances()) ?? []
+      } catch {}
       const remote = await fetchRemoteInstances()
       // 与 fallback 合并去重
       const merged = [
@@ -340,7 +338,7 @@ export default {
         })
         return
       }
-      await env.KV.put('instances', JSON.stringify(healthy))
+      await stateStore.setInstances(healthy)
       cronLogger.info('scheduled refresh updated upstream instances', {
         event: 'cron.refresh',
         outcome: 'updated',

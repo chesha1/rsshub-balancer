@@ -6,6 +6,7 @@ import {
   withRequestId,
   withResponseRequestId,
 } from './log'
+import type { StateStore } from './store'
 import { shuffle, trimSlash } from './utils'
 
 // `forward` 表示当前尝试正好命中了缓存探测选出的上游；
@@ -37,25 +38,58 @@ export async function fetchRemoteInstances(): Promise<string[]> {
   return urls
 }
 
-// 从 KV 读取实例列表；首次为空时写入 fallbackUpstreams 作为种子
-export async function getUpstreams(kv: KVNamespace): Promise<string[]> {
-  const raw = await kv.get('instances')
-  if (raw) {
-    try {
-      const list = JSON.parse(raw) as string[]
-      if (list.length > 0) return list
-    } catch {
-      // JSON 解析失败，回退
-    }
+// 从状态存储读取实例列表；首次为空时写入 fallbackUpstreams 作为种子。
+export async function getUpstreams(store: StateStore): Promise<string[]> {
+  try {
+    const list = await store.getInstances()
+    if (list && list.length > 0) return list
+  } catch (e) {
+    upstreamLogger.warn('state store instances read failed; using fallback', {
+      event: 'state_store.instances',
+      outcome: 'fallback',
+      ...errorProps(e),
+    })
+    return config.fallbackUpstreams
   }
-  await kv.put('instances', JSON.stringify(config.fallbackUpstreams))
+
+  try {
+    await store.setInstances(config.fallbackUpstreams)
+  } catch (e) {
+    upstreamLogger.warn('state store instances seed failed; using fallback', {
+      event: 'state_store.instances',
+      outcome: 'seed_failed',
+      ...errorProps(e),
+    })
+  }
   return config.fallbackUpstreams
+}
+
+// 在后台写入失败标记；写入异常只记录 warning，不能影响当前请求响应。
+async function markFailedUpstreamInBackground(
+  store: StateStore,
+  upstream: string,
+  pathname: string,
+  ttlSeconds: number,
+  logger: ReturnType<typeof bindRequestLogger>,
+): Promise<void> {
+  try {
+    await store.markUpstreamFailed(upstream, pathname, ttlSeconds)
+  } catch (e) {
+    logger.warn('state store failed marker write failed; ignoring marker', {
+      event: 'state_store.fail_marker',
+      outcome: 'ignored_write_failure',
+      upstream,
+      pathname,
+      ttlSeconds,
+      ...errorProps(e),
+    })
+  }
 }
 
 // 按优先级依次尝试上游实例，返回首个成功响应；全部失败时返回 502
 export async function fetchFromUpstream(
   request: Request,
-  kv: KVNamespace,
+  store: StateStore,
   waitUntil: (p: Promise<unknown>) => void,
   requestId: string,
   logContext: UpstreamLogContext = {},
@@ -81,7 +115,7 @@ export async function fetchFromUpstream(
   let cacheProbeStartedAt: number | undefined
   let fetchStartedAt: number | undefined
   try {
-    const upstreams = await getUpstreams(kv)
+    const upstreams = await getUpstreams(store)
     const url = new URL(tracedRequest.url)
     const requestPath = url.pathname + url.search
     const pathname = url.pathname
@@ -92,20 +126,21 @@ export async function fetchFromUpstream(
       method !== 'GET' && method !== 'HEAD'
         ? await tracedRequest.arrayBuffer()
         : undefined
-    // 并行读取所有上游对当前路由的失败记录
-    const failKeys = upstreams.map((u) => `fail:${u}|${pathname}`)
-    const failResults = await Promise.all(failKeys.map((key) => kv.get(key)))
-    const failedUpstreams = upstreams.filter((_, i) => failResults[i])
+    // 并行读取所有上游对当前路由的失败记录；失败时按全健康处理。
+    let failedUpstreams: Set<string>
+    try {
+      failedUpstreams = await store.getFailedUpstreams(upstreams, pathname)
+    } catch {
+      failedUpstreams = new Set()
+    }
 
     // 分为 healthy / unhealthy 两组，各组内随机洗牌
-    const healthyUpstreams = upstreams.filter(
-      (u) => !failedUpstreams.includes(u),
-    )
+    const healthyUpstreams = upstreams.filter((u) => !failedUpstreams.has(u))
     healthyUpstreamCount = healthyUpstreams.length
-    failedUpstreamCount = failedUpstreams.length
+    failedUpstreamCount = failedUpstreams.size
     const orderedUpstreams = [
       ...shuffle(healthyUpstreams),
-      ...shuffle(failedUpstreams),
+      ...shuffle(upstreams.filter((u) => failedUpstreams.has(u))),
     ]
 
     prepareDurationMs = Date.now() - startedAt
@@ -203,11 +238,18 @@ export async function fetchFromUpstream(
           return withResponseRequestId(res, requestId)
         }
       } catch {}
-      // 仅在当前路由尚未标记该上游失败时才写入，减少重复 KV 写入。
-      if (!failedUpstreams.includes(upstream)) {
-        failedUpstreams.push(upstream)
-        const failKey = `fail:${upstream}|${pathname}`
-        waitUntil(kv.put(failKey, '1', { expirationTtl: config.failTtl }))
+      // 仅在当前路由尚未标记该上游失败时才写入，减少重复状态存储写入。
+      if (!failedUpstreams.has(upstream)) {
+        failedUpstreams.add(upstream)
+        waitUntil(
+          markFailedUpstreamInBackground(
+            store,
+            upstream,
+            pathname,
+            config.failTtl,
+            logger,
+          ),
+        )
       }
     }
 
