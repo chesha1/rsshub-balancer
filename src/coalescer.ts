@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { bindRequestLogger, coalescerLogger } from './log'
+import { recordMetric } from './metrics'
 import type { ResponseSnapshot } from './types'
 import { fetchFromUpstream } from './upstream'
 import { fromResponse } from './utils'
@@ -49,11 +50,42 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
     }
 
     const snapshot = await promise
+    const durationMs = Date.now() - startedAt
+    recordMetric(this.env.METRICS, {
+      metric: 'coalesce_role',
+      layer: 'do',
+      role: coalesceRole === 'do-leader' ? 'leader' : 'follower',
+      method: request.method,
+      reason: coalesceRole === 'do-follower' ? 'do_follower' : 'none',
+      status: snapshot.status,
+      durationMs,
+    })
+    if (coalesceRole === 'do-follower') {
+      recordMetric(this.env.METRICS, {
+        metric: 'benefited',
+        layer: 'do',
+        role: 'follower',
+        method: request.method,
+        reason: 'do_follower',
+        status: snapshot.status,
+        durationMs,
+      })
+    } else {
+      recordMetric(this.env.METRICS, {
+        metric: 'direct_upstream',
+        layer: 'do',
+        role: 'leader',
+        method: request.method,
+        reason: 'do_leader',
+        status: snapshot.status,
+        durationMs,
+      })
+    }
     logger.info('durable object coalescing completed', {
       event: 'coalesce.completed',
       coalesceRole,
       status: snapshot.status,
-      durationMs: Date.now() - startedAt,
+      durationMs,
     })
     return snapshot
   }

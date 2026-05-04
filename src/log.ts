@@ -107,6 +107,7 @@ const rootLogger = getLogger(['rsshub-balancer'])
 export const httpLogger = rootLogger.getChild('http')
 export const upstreamLogger = rootLogger.getChild('upstream')
 export const coalescerLogger = rootLogger.getChild('coalescer')
+export const metricsLogger = rootLogger.getChild('metrics')
 export const cronLogger = rootLogger.getChild('cron')
 
 export type RequestLogger = Logger

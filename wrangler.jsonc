@@ -17,6 +17,12 @@
       "remote": true
     }
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "METRICS",
+      "dataset": "rsshub_balancer_metrics"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

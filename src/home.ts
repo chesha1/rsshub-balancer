@@ -52,7 +52,7 @@ export function renderHome(upstreams: string[]) {
     <tr><td><code>/healthz</code></td><td>✅ 自定义</td><td>聚合检查所有上游实例健康状态</td></tr>
     <tr><td><code>/robots.txt</code></td><td>✅ 自定义</td><td>禁止所有搜索引擎索引</td></tr>
     <tr><td><code>/api/route/status</code></td><td>✅ 聚合代理</td><td>查询任一上游是否已缓存指定路由</td></tr>
-    <tr><td><code>/metrics</code></td><td>🚧 未实现</td><td>OpenTelemetry 指标，计划后续支持</td></tr>
+    <tr><td><code>/metrics</code></td><td>🚫 未开放</td><td>合并收益指标写入 Workers Analytics Engine，通过 SQL API 查询</td></tr>
     <tr><td><code>/api/openapi.json</code></td><td>❌ 不可用</td><td>API 文档请直接访问上游实例</td></tr>
     <tr><td><code>/api/reference</code></td><td>❌ 不可用</td><td>交互式 API 文档 UI</td></tr>
     <tr><td><code>/api/namespace, /api/namespace/*</code></td><td>❌ 不可用</td><td>命名空间元数据查询</td></tr>
@@ -95,7 +95,7 @@ export function renderHome(upstreams: string[]) {
     <tr><td><code>/healthz</code></td><td>✅ Custom</td><td>Aggregated health check across all upstreams</td></tr>
     <tr><td><code>/robots.txt</code></td><td>✅ Custom</td><td>Disallows all search engine indexing</td></tr>
     <tr><td><code>/api/route/status</code></td><td>✅ Aggregated proxy</td><td>Checks if any upstream has cached the given route</td></tr>
-    <tr><td><code>/metrics</code></td><td>🚧 Not yet</td><td>OpenTelemetry metrics — planned for future support</td></tr>
+    <tr><td><code>/metrics</code></td><td>🚫 Not public</td><td>Coalescing benefit metrics are written to Workers Analytics Engine and queried through the SQL API</td></tr>
     <tr><td><code>/api/openapi.json</code></td><td>❌ Unavailable</td><td>API docs — visit an upstream instance directly</td></tr>
     <tr><td><code>/api/reference</code></td><td>❌ Unavailable</td><td>Interactive API docs UI</td></tr>
     <tr><td><code>/api/namespace, /api/namespace/*</code></td><td>❌ Unavailable</td><td>Namespace metadata queries</td></tr>

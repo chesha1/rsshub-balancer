@@ -13,6 +13,7 @@ import {
   REQUEST_ID_HEADER,
   withResponseRequestId,
 } from './log'
+import { recordMetric } from './metrics'
 import type { ResponseSnapshot } from './types'
 import {
   fetchFromUpstream,
@@ -162,13 +163,30 @@ app.all('/*', async (c) => {
 
   // 非 GET 请求不参与合并，直接转发上游并返回原始 Response
   if (method !== 'GET') {
-    return await fetchFromUpstream(
+    const res = await fetchFromUpstream(
       request,
       c.env.KV,
       // 把失败标记等后台写入交给 waitUntil，避免阻塞当前响应。
       (p) => c.executionCtx.waitUntil(p),
       requestId,
     )
+    const durationMs = Date.now() - startedAt
+    recordMetric(c.env.METRICS, {
+      metric: 'route_request',
+      layer: 'edge',
+      method,
+      status: res.status,
+      durationMs,
+    })
+    recordMetric(c.env.METRICS, {
+      metric: 'direct_upstream',
+      layer: 'edge',
+      method,
+      reason: 'non_get',
+      status: res.status,
+      durationMs,
+    })
+    return res
   }
 
   // GET：两层合并（isolate 级 → Durable Object 级）
@@ -209,7 +227,17 @@ app.all('/*', async (c) => {
               degradeError: errorProps(e),
             },
           )
-          return await fromResponse(res)
+          const snapshot = await fromResponse(res)
+          recordMetric(c.env.METRICS, {
+            metric: 'direct_upstream',
+            layer: 'isolate',
+            role: 'leader',
+            method,
+            reason: 'do_rpc_failed',
+            status: snapshot.status,
+            durationMs: Date.now() - startedAt,
+          })
+          return snapshot
         }
       } finally {
         inflight.delete(requestPath)
@@ -219,11 +247,41 @@ app.all('/*', async (c) => {
   }
 
   const snapshot = await promise
+  const durationMs = Date.now() - startedAt
+  const coalesceRoleMetric =
+    coalesceRole === 'isolate-leader' ? 'leader' : 'follower'
+  recordMetric(c.env.METRICS, {
+    metric: 'route_request',
+    layer: 'edge',
+    method,
+    status: snapshot.status,
+    durationMs,
+  })
+  recordMetric(c.env.METRICS, {
+    metric: 'coalesce_role',
+    layer: 'isolate',
+    role: coalesceRoleMetric,
+    method,
+    reason: coalesceRole === 'isolate-follower' ? 'isolate_follower' : 'none',
+    status: snapshot.status,
+    durationMs,
+  })
+  if (coalesceRole === 'isolate-follower') {
+    recordMetric(c.env.METRICS, {
+      metric: 'benefited',
+      layer: 'isolate',
+      role: 'follower',
+      method,
+      reason: 'isolate_follower',
+      status: snapshot.status,
+      durationMs,
+    })
+  }
   logger.info('isolate coalescing completed', {
     event: 'coalesce.completed',
     coalesceRole,
     status: snapshot.status,
-    durationMs: Date.now() - startedAt,
+    durationMs,
   })
   return withResponseRequestId(toResponse(snapshot), requestId)
 })
