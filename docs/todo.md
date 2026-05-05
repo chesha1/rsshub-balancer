@@ -27,3 +27,10 @@
 - 对照 Redis / Valkey 服务端指标，重点查看连接数波动、连接拒绝数、慢日志、命令延迟和网络延迟。
 - 做 Redis / KV A/B 或临时提高 Redis `connectTimeout`，验证告警频率是否随外部 Redis 路径变化。
 - 在确认 listener 有界且会被清理之前，不直接使用 `setMaxListeners()` 压掉告警。
+
+# 其他
+
+- [ ] 多写一个 label，统计各 upstream 的请求占比
+- [ ] 解决 get instances 超时问题
+- [ ] 减少对 DO 的使用
+- [ ] 实现前端页面

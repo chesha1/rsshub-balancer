@@ -29,3 +29,7 @@ const app = new Hono<{ Bindings: CloudflareBindings }>()
 合并收益统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_metrics`。指标是近似统计，查询时需要使用 `_sample_interval` 修正采样。
 
 Metrics 查询 SQL 见 [docs/metrics.md](docs/metrics.md)。
+
+## 项目边界
+
+本项目定位为 RSSHub 场景下的轻量 HTTP L7 路由与请求合并器，不会继续扩展成完整软件负载均衡器。能力边界和后续维护方向见 [docs/capability-boundary.md](docs/capability-boundary.md)。
