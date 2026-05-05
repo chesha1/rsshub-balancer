@@ -1,6 +1,5 @@
 import { config } from './config'
 import {
-  bindRequestLogger,
   errorProps,
   upstreamLogger,
   withRequestId,
@@ -70,19 +69,21 @@ async function markFailedUpstreamInBackground(
   upstream: string,
   pathname: string,
   ttlSeconds: number,
-  logger: ReturnType<typeof bindRequestLogger>,
 ): Promise<void> {
   try {
     await store.markUpstreamFailed(upstream, pathname, ttlSeconds)
   } catch (e) {
-    logger.warn('state store failed marker write failed; ignoring marker', {
-      event: 'state_store.fail_marker',
-      outcome: 'ignored_write_failure',
-      upstream,
-      pathname,
-      ttlSeconds,
-      ...errorProps(e),
-    })
+    upstreamLogger.warn(
+      'state store failed marker write failed; ignoring marker',
+      {
+        event: 'state_store.fail_marker',
+        outcome: 'ignored_write_failure',
+        upstream,
+        pathname,
+        ttlSeconds,
+        ...errorProps(e),
+      },
+    )
   }
 }
 
@@ -91,11 +92,9 @@ export async function fetchFromUpstream(
   request: Request,
   store: StateStore,
   waitUntil: (p: Promise<unknown>) => void,
-  requestId: string,
   logContext: UpstreamLogContext = {},
 ): Promise<Response> {
-  const tracedRequest = withRequestId(request, requestId)
-  const logger = bindRequestLogger(upstreamLogger, requestId, tracedRequest)
+  const tracedRequest = withRequestId(request)
   const startedAt = Date.now()
   let phase: UpstreamPhase = 'prepare'
   let healthyUpstreamCount = 0
@@ -164,7 +163,7 @@ export async function fetchFromUpstream(
     cacheProbeDurationMs = Date.now() - cacheProbeStartedAt
     cacheHit = Boolean(selectedUpstreamHost)
     // 缓存探测阶段只记录“是否命中”以及命中的候选上游，不再按实例逐条展开。
-    logger.info('upstream cache probe completed', {
+    upstreamLogger.info('upstream cache probe completed', {
       event: 'upstream.cache_probe',
       outcome: cacheHit ? 'hit' : 'miss',
       cacheHit,
@@ -210,7 +209,7 @@ export async function fetchFromUpstream(
         })
         if (res.status >= 200 && res.status < 400) {
           fetchDurationMs = Date.now() - fetchStartedAt
-          logger.info('upstream fetch completed', {
+          upstreamLogger.info('upstream fetch completed', {
             event: 'upstream.fetch',
             outcome:
               finalAttemptKind === 'forward'
@@ -235,7 +234,7 @@ export async function fetchFromUpstream(
             fallbackUsed: fallbackAttemptCount > 0,
             ...logContext,
           })
-          return withResponseRequestId(res, requestId)
+          return withResponseRequestId(res)
         }
       } catch {}
       // 仅在当前路由尚未标记该上游失败时才写入，减少重复状态存储写入。
@@ -247,7 +246,6 @@ export async function fetchFromUpstream(
             upstream,
             pathname,
             config.failTtl,
-            logger,
           ),
         )
       }
@@ -255,7 +253,7 @@ export async function fetchFromUpstream(
 
     // 当前请求未被任何上游成功处理
     fetchDurationMs = Date.now() - fetchStartedAt
-    logger.error('upstream fetch failed', {
+    upstreamLogger.error('upstream fetch failed', {
       event: 'upstream.fetch',
       outcome: 'all_failed',
       status: 502,
@@ -280,7 +278,6 @@ export async function fetchFromUpstream(
         status: 502,
         headers: { 'content-type': 'text/plain; charset=UTF-8' },
       }),
-      requestId,
     )
   } catch (e) {
     if (phase === 'prepare') {
@@ -290,7 +287,7 @@ export async function fetchFromUpstream(
     } else if (phase === 'fetch' && fetchStartedAt !== undefined) {
       fetchDurationMs = Date.now() - fetchStartedAt
     }
-    logger.error('upstream fetch raised an unexpected error', {
+    upstreamLogger.error('upstream fetch raised an unexpected error', {
       event: 'upstream.fetch',
       outcome: 'error',
       phase,
@@ -320,7 +317,6 @@ export async function fetchFromUpstream(
         status: 502,
         headers: { 'content-type': 'text/plain; charset=UTF-8' },
       }),
-      requestId,
     )
   }
 }

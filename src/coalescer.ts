@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
-import { bindRequestLogger, coalescerLogger } from './log'
+import { coalescerLogger, getRequestId, withRequestLogContext } from './log'
 import { recordMetric } from './metrics'
 import { createStateStore } from './store'
 import type { ResponseSnapshot } from './types'
@@ -11,11 +11,19 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
   // 跨 isolate 的同路径并发 GET 请求在此合并，leader 完成后条目自动清除。
   private inflight = new Map<string, Promise<ResponseSnapshot>>()
 
-  async coalesce(
+  async coalesce(request: Request): Promise<ResponseSnapshot> {
+    const requestId = getRequestId(request)
+    if (!requestId) return await this.coalesceWithContext(request)
+
+    return await withRequestLogContext(requestId, async () =>
+      this.coalesceWithContext(request),
+    )
+  }
+
+  // 在已绑定 Request ID 的日志上下文里执行 DO 请求合并主流程。
+  private async coalesceWithContext(
     request: Request,
-    requestId: string,
   ): Promise<ResponseSnapshot> {
-    const logger = bindRequestLogger(coalescerLogger, requestId, request)
     const url = new URL(request.url)
     const requestPath = url.pathname + url.search
     const startedAt = Date.now()
@@ -24,13 +32,16 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
     let coalesceRole: 'do-leader' | 'do-follower'
     if (promise) {
       coalesceRole = 'do-follower'
-      logger.debug('durable object coalescer joined an inflight request', {
-        event: 'coalesce.join',
-        coalesceRole,
-      })
+      coalescerLogger.debug(
+        'durable object coalescer joined an inflight request',
+        {
+          event: 'coalesce.join',
+          coalesceRole,
+        },
+      )
     } else {
       coalesceRole = 'do-leader'
-      logger.debug('durable object coalescer is leading a request', {
+      coalescerLogger.debug('durable object coalescer is leading a request', {
         event: 'coalesce.join',
         coalesceRole,
       })
@@ -40,7 +51,6 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
             request,
             createStateStore(this.env),
             (p) => this.ctx.waitUntil(p),
-            requestId,
           )
           return await fromResponse(res)
         } finally {
@@ -82,7 +92,7 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
         durationMs,
       })
     }
-    logger.info('durable object coalescing completed', {
+    coalescerLogger.info('durable object coalescing completed', {
       event: 'coalesce.completed',
       coalesceRole,
       status: snapshot.status,

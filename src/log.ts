@@ -1,9 +1,10 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   configureSync,
   getConsoleSink,
   getLogger,
-  type Logger,
   type LogRecord,
+  withContext,
 } from '@logtape/logtape'
 
 // `X-` 前缀早已不是标准推荐做法；更标准化的分布式追踪通常会用 `traceparent`。
@@ -80,8 +81,11 @@ function formatRecord(record: LogRecord): Record<string, unknown> {
   }
 }
 
+const logContextStorage = new AsyncLocalStorage<Record<string, unknown>>()
+
 // 整个 Worker 共用一套同步 console sink，避免每个模块各自重复初始化 logger。
 configureSync({
+  contextLocalStorage: logContextStorage,
   sinks: {
     console: getConsoleSink({
       formatter: (record) => [formatRecord(record)],
@@ -111,24 +115,28 @@ export const metricsLogger = rootLogger.getChild('metrics')
 export const cronLogger = rootLogger.getChild('cron')
 export const storeLogger = rootLogger.getChild('store')
 
-export type RequestLogger = Logger
-
-// 把当前请求的固定字段预先绑定到 logger 上，减少每次打日志时重复拼上下文。
-export function bindRequestLogger(
-  logger: Logger,
+// 为当前异步流程绑定 Request ID，后续任意模块 logger 都会自动带上它。
+export function withRequestLogContext<T>(
   requestId: string,
-  request: Request,
-): Logger {
-  const url = new URL(request.url)
-  return logger.with({
-    requestId,
-    method: request.method,
-    path: url.pathname,
-  })
+  callback: () => T,
+): T {
+  return withContext({ requestId }, callback)
+}
+
+// 读取当前异步请求上下文里的 Request ID，供 header 透传等非日志场景复用。
+export function getCurrentRequestId(): string | undefined {
+  const requestId = logContextStorage.getStore()?.requestId
+  return typeof requestId === 'string' ? requestId : undefined
 }
 
 // Hono requestId middleware 只会把值写到 context/response，内部转发时需要手动补到请求头上。
-export function withRequestId(request: Request, requestId: string): Request {
+export function withRequestId(
+  request: Request,
+  requestId = getCurrentRequestId(),
+): Request {
+  if (!requestId) return request
+  if (request.headers.get(REQUEST_ID_HEADER) === requestId) return request
+
   const headers = new Headers(request.headers)
   headers.set(REQUEST_ID_HEADER, requestId)
   return new Request(request, { headers })
@@ -137,8 +145,10 @@ export function withRequestId(request: Request, requestId: string): Request {
 // 给原生 Response 显式补上 X-Request-Id，保证直接返回 Response 的路径也能把请求 ID 回给客户端。
 export function withResponseRequestId(
   response: Response,
-  requestId: string,
+  requestId = getCurrentRequestId(),
 ): Response {
+  if (!requestId) return response
+
   const headers = new Headers(response.headers)
   headers.set(REQUEST_ID_HEADER, requestId)
   return new Response(response.body, {

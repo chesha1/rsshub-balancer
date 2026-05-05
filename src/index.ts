@@ -1,16 +1,15 @@
 import { honoLogger } from '@logtape/hono'
-import type { Logger } from '@logtape/logtape'
 import { Hono } from 'hono'
 import { requestId } from 'hono/request-id'
 import { v7 as uuidv7 } from 'uuid'
 import { config } from './config'
 import { renderHome } from './home'
 import {
-  bindRequestLogger,
   cronLogger,
   errorProps,
   httpLogger,
-  REQUEST_ID_HEADER,
+  withRequestId,
+  withRequestLogContext,
   withResponseRequestId,
 } from './log'
 import { recordMetric } from './metrics'
@@ -60,9 +59,6 @@ function shouldSkipAccessLog(path: string) {
 
 const app = new Hono<{
   Bindings: CloudflareBindings
-  Variables: {
-    logger: Logger
-  }
 }>()
 
 // 为每个外部请求生成/复用一个 X-Request-Id，作为整条链路的业务关联键。
@@ -72,11 +68,10 @@ app.use(
   }),
 )
 
-// 把 requestId、method、path 绑定到请求级 logger 上，后续 handler 直接复用。
+// 把 requestId、method、path 绑定到当前异步请求上下文，后续任意 logger 都能自动复用。
 app.use(async (c, next) => {
-  const logger = bindRequestLogger(httpLogger, c.get('requestId'), c.req.raw)
-  c.set('logger', logger)
-  await next()
+  const requestId = c.get('requestId')
+  await withRequestLogContext(requestId, next)
 })
 
 // 统一记录入口访问日志；健康检查和 Cloudflare 自带探针路径默认跳过，减少噪音。
@@ -86,7 +81,6 @@ app.use(
     skip: (c) => shouldSkipAccessLog(c.req.path),
     format: (c, durationMs) => ({
       event: 'http.request',
-      requestId: c.res.headers.get(REQUEST_ID_HEADER) ?? undefined,
       method: c.req.method,
       path: c.req.path,
       status: c.res.status,
@@ -140,7 +134,7 @@ app.get('/api/route/status', async (c) => {
         throw new Error(`${res.status}`)
       }),
     )
-    return withResponseRequestId(response, c.get('requestId'))
+    return withResponseRequestId(response)
   } catch {
     return c.json({ cached: false, lastBuildDate: null }, 404)
   }
@@ -157,8 +151,6 @@ app.all('/*', async (c) => {
   const url = new URL(c.req.url)
   const requestPath = url.pathname + url.search
   const method = c.req.method
-  const requestId = c.get('requestId')
-  const logger = c.get('logger')
   const request = c.req.raw
   const startedAt = Date.now()
   const stateStore = createStateStore(c.env)
@@ -170,7 +162,6 @@ app.all('/*', async (c) => {
       stateStore,
       // 把失败标记等后台写入交给 waitUntil，避免阻塞当前响应。
       (p) => c.executionCtx.waitUntil(p),
-      requestId,
     )
     const durationMs = Date.now() - startedAt
     recordMetric(c.env.METRICS, {
@@ -192,7 +183,7 @@ app.all('/*', async (c) => {
   }
 
   // GET：两层合并（isolate 级 → Durable Object 级）
-  // TODO: 当前只有 leader 的 requestId 会继续进入 DO / upstream。
+  // TODO: 当前只有 leader 的请求上下文会继续进入 DO / upstream。
   // 也就是说 follower 请求虽然能拿到响应，但在日志里找不到自己对应的
   // DO / upstream 链路；后面如果要增强追踪，再把 external requestId 和
   // shared fetch/coalesce id 拆开建模。
@@ -200,13 +191,13 @@ app.all('/*', async (c) => {
   let coalesceRole: 'isolate-leader' | 'isolate-follower'
   if (promise) {
     coalesceRole = 'isolate-follower'
-    logger.debug('request joined an inflight isolate request', {
+    httpLogger.debug('request joined an inflight isolate request', {
       event: 'coalesce.join',
       coalesceRole,
     })
   } else {
     coalesceRole = 'isolate-leader'
-    logger.debug('request is leading an isolate coalesced fetch', {
+    httpLogger.debug('request is leading an isolate coalesced fetch', {
       event: 'coalesce.join',
       coalesceRole,
     })
@@ -215,14 +206,13 @@ app.all('/*', async (c) => {
         try {
           const id = c.env.DO.idFromName(requestPath)
           const stub = c.env.DO.get(id)
-          return await stub.coalesce(request, requestId)
+          return await stub.coalesce(withRequestId(request))
         } catch (e) {
           const res = await fetchFromUpstream(
             request,
             stateStore,
             // 降级直连上游时，仍然沿用同一个 waitUntil 提交后台任务。
             (p) => c.executionCtx.waitUntil(p),
-            requestId,
             {
               degradedToDirect: true,
               degradeReason: 'do_rpc_failed',
@@ -279,13 +269,13 @@ app.all('/*', async (c) => {
       durationMs,
     })
   }
-  logger.info('isolate coalescing completed', {
+  httpLogger.info('isolate coalescing completed', {
     event: 'coalesce.completed',
     coalesceRole,
     status: snapshot.status,
     durationMs,
   })
-  return withResponseRequestId(toResponse(snapshot), requestId)
+  return withResponseRequestId(toResponse(snapshot))
 })
 
 export default {
