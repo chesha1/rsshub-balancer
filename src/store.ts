@@ -72,7 +72,7 @@ function parseInstances(raw: string | null): string[] | undefined {
 
 // 统一生成失败标记 key，保证 KV 和 Redis 后端使用完全相同的业务 key。
 function failedUpstreamKey(upstream: string, pathname: string): string {
-  return `fail:${upstream}|${pathname}`
+  return `fail:${upstream}:${pathname}`
 }
 
 // 规范化状态存储后端配置；未知值回退到 KV，并写日志提示配置问题。
