@@ -1,5 +1,9 @@
 import type { ResponseSnapshot } from './types'
 
+type ToResponseOptions = {
+  includeBody?: boolean
+}
+
 export function trimSlash(url: string) {
   return url.replace(/\/+$/, '')
 }
@@ -19,9 +23,13 @@ export async function fromResponse(res: Response): Promise<ResponseSnapshot> {
   return { status: res.status, headers: [...res.headers], body }
 }
 
-// 从快照创建独立的 Response（body 会被复制）
-export function toResponse(snapshot: ResponseSnapshot): Response {
-  return new Response(snapshot.body.slice(0), {
+// 从快照创建独立的 Response；HEAD 等场景可以只复用状态码和 headers，不返回 body。
+export function toResponse(
+  snapshot: ResponseSnapshot,
+  options: ToResponseOptions = {},
+): Response {
+  const includeBody = options.includeBody ?? true
+  return new Response(includeBody ? snapshot.body.slice(0) : null, {
     status: snapshot.status,
     headers: snapshot.headers,
   })

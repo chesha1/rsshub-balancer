@@ -30,7 +30,7 @@ const app = new Hono<{ Bindings: CloudflareBindings }>()
 
 下面这个 SQL 统计最近 24 小时的合并收益，适合直接给饼图或环图使用：
 
-- `direct_total`：真实打到上游的请求数，包括 DO leader、非 GET 直连、DO RPC 失败后的降级直连
+- `direct_total`：真实打到上游的请求数，包括 DO leader、非 GET/HEAD 直连、DO RPC 失败后的降级直连
 - `isolate_benefited_total`：在同一个 Worker isolate 内复用已有请求结果的 follower 数
 - `do_benefited_total`：跨 isolate 进入 Durable Object 后复用已有请求结果的 follower 数
 - `benefited_total`：两层合并一共节省的请求数

@@ -7,8 +7,8 @@ import { fetchFromUpstream } from './upstream'
 import { fromResponse } from './utils'
 
 export class RequestCoalescer extends DurableObject<CloudflareBindings> {
-  // DO 级请求合并：key 为 requestPath（pathname + search），value 为正在进行的上游解析 promise。
-  // 跨 isolate 的同路径并发 GET 请求在此合并，leader 完成后条目自动清除。
+  // DO 级请求合并：key 为 method + requestPath，value 为正在进行的上游解析 promise。
+  // 跨 isolate 的同路径同方法并发 GET/HEAD 请求在此合并，leader 完成后条目自动清除。
   private inflight = new Map<string, Promise<ResponseSnapshot>>()
 
   async coalesce(request: Request): Promise<ResponseSnapshot> {
@@ -26,9 +26,10 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
   ): Promise<ResponseSnapshot> {
     const url = new URL(request.url)
     const requestPath = url.pathname + url.search
+    const coalesceKey = `${request.method} ${requestPath}`
     const startedAt = Date.now()
 
-    let promise = this.inflight.get(requestPath)
+    let promise = this.inflight.get(coalesceKey)
     let coalesceRole: 'do-leader' | 'do-follower'
     if (promise) {
       coalesceRole = 'do-follower'
@@ -54,10 +55,10 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
           )
           return await fromResponse(res)
         } finally {
-          this.inflight.delete(requestPath)
+          this.inflight.delete(coalesceKey)
         }
       })()
-      this.inflight.set(requestPath, promise)
+      this.inflight.set(coalesceKey, promise)
     }
 
     const snapshot = await promise

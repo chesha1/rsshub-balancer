@@ -24,8 +24,8 @@ import { fromResponse, toResponse, trimSlash } from './utils'
 
 export { RequestCoalescer } from './coalescer'
 
-// isolate 级请求合并：key 为 requestPath（pathname + search），value 为正在进行的上游解析 promise。
-// 同一 isolate 内对同一路径的并发 GET 请求共享同一个 promise，leader 完成后条目自动清除。
+// isolate 级请求合并：key 为 method + requestPath，value 为正在进行的上游解析 promise。
+// 同一 isolate 内对同一路径同方法的并发 GET/HEAD 请求共享同一个 promise，leader 完成后条目自动清除。
 const inflight = new Map<string, Promise<ResponseSnapshot>>()
 
 // 这些路径会频繁被探测或访问，保留路由行为但默认不写入口访问日志。
@@ -151,12 +151,13 @@ app.all('/*', async (c) => {
   const url = new URL(c.req.url)
   const requestPath = url.pathname + url.search
   const method = c.req.method
+  const coalesceKey = `${method} ${requestPath}`
   const request = c.req.raw
   const startedAt = Date.now()
   const stateStore = createStateStore(c.env)
 
-  // 非 GET 请求不参与合并，直接转发上游并返回原始 Response
-  if (method !== 'GET') {
+  // GET/HEAD 是安全方法，参与两级请求合并；其他方法直接转发上游并返回原始 Response。
+  if (method !== 'GET' && method !== 'HEAD') {
     const res = await fetchFromUpstream(
       request,
       stateStore,
@@ -182,12 +183,12 @@ app.all('/*', async (c) => {
     return res
   }
 
-  // GET：两层合并（isolate 级 → Durable Object 级）
+  // GET/HEAD：两层合并（isolate 级 → Durable Object 级）。
   // TODO: 当前只有 leader 的请求上下文会继续进入 DO / upstream。
   // 也就是说 follower 请求虽然能拿到响应，但在日志里找不到自己对应的
   // DO / upstream 链路；后面如果要增强追踪，再把 external requestId 和
   // shared fetch/coalesce id 拆开建模。
-  let promise = inflight.get(requestPath)
+  let promise = inflight.get(coalesceKey)
   let coalesceRole: 'isolate-leader' | 'isolate-follower'
   if (promise) {
     coalesceRole = 'isolate-follower'
@@ -204,7 +205,7 @@ app.all('/*', async (c) => {
     promise = (async (): Promise<ResponseSnapshot> => {
       try {
         try {
-          const id = c.env.DO.idFromName(requestPath)
+          const id = c.env.DO.idFromName(coalesceKey)
           const stub = c.env.DO.get(id)
           return await stub.coalesce(withRequestId(request))
         } catch (e) {
@@ -232,10 +233,10 @@ app.all('/*', async (c) => {
           return snapshot
         }
       } finally {
-        inflight.delete(requestPath)
+        inflight.delete(coalesceKey)
       }
     })()
-    inflight.set(requestPath, promise)
+    inflight.set(coalesceKey, promise)
   }
 
   const snapshot = await promise
@@ -275,7 +276,9 @@ app.all('/*', async (c) => {
     status: snapshot.status,
     durationMs,
   })
-  return withResponseRequestId(toResponse(snapshot))
+  return withResponseRequestId(
+    toResponse(snapshot, { includeBody: method !== 'HEAD' }),
+  )
 })
 
 export default {
