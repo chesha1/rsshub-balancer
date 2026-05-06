@@ -31,6 +31,6 @@
 # 其他
 
 - [x] 多写一个 label，统计各 upstream 的请求占比
-- [ ] 解决 get instances 超时问题
+- [ ] 解决 get instances 超时问题，先按 [instances stale cache 方案](./instances-stale-cache-plan.md) 收敛请求热路径风险
 - [ ] 减少对 DO 的使用
 - [ ] 实现前端页面
