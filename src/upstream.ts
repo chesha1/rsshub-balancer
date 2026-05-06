@@ -20,10 +20,22 @@ type UpstreamLogContext = {
   degradeError?: Record<string, unknown>
 }
 
+type GetUpstreamsOptions = {
+  waitUntil?: (promise: Promise<unknown>) => void
+}
+
+type InstancesCache = {
+  upstreams: string[]
+  updatedAtMs: number
+}
+
 export type UpstreamFetchResult = {
   response: Response
   upstream?: string
 }
+
+let instancesCache: InstancesCache | undefined
+let instancesRefreshPromise: Promise<string[] | undefined> | undefined
 
 // 从 GitHub 获取远程实例列表
 export async function fetchRemoteInstances(): Promise<string[]> {
@@ -42,30 +54,97 @@ export async function fetchRemoteInstances(): Promise<string[]> {
   return urls
 }
 
-// 从状态存储读取实例列表；首次为空时写入 fallbackUpstreams 作为种子。
-export async function getUpstreams(store: StateStore): Promise<string[]> {
-  try {
-    const list = await store.getInstances()
-    if (list && list.length > 0) return list
-  } catch (e) {
-    upstreamLogger.warn('state store instances read failed; using fallback', {
-      event: 'state_store.instances',
-      outcome: 'fallback',
-      ...errorProps(e),
-    })
-    return config.fallbackUpstreams
+// 更新当前运行时的 instances 内存缓存，用于请求热路径复用最近一次非空列表。
+export function cacheInstances(upstreams: readonly string[]): string[] {
+  const nowMs = Date.now()
+  const cachedUpstreams = [...upstreams]
+  instancesCache = {
+    upstreams: cachedUpstreams,
+    updatedAtMs: nowMs,
+  }
+
+  return [...cachedUpstreams]
+}
+
+// 从状态存储读取实例列表；为空时只在当前运行时降级使用 fallback，不写回远程状态存储。
+async function readInstancesFromStore(store: StateStore): Promise<string[]> {
+  const list = await store.getInstances()
+  if (list && list.length > 0) return cacheInstances(list)
+
+  upstreamLogger.warn('state store instances empty; using fallback', {
+    event: 'state_store.instances_cache',
+    outcome: 'empty_using_fallback',
+    upstreamCount: config.fallbackUpstreams.length,
+  })
+
+  return config.fallbackUpstreams
+}
+
+// 确保同一运行时只有一个 instances 后台刷新任务，刷新失败时保留旧缓存。
+function ensureInstancesRefresh(
+  store: StateStore,
+  currentCache: InstancesCache,
+): Promise<string[] | undefined> {
+  if (instancesRefreshPromise) return instancesRefreshPromise
+
+  const startedAt = Date.now()
+  instancesRefreshPromise = (async () => {
+    try {
+      return await readInstancesFromStore(store)
+    } catch (e) {
+      upstreamLogger.warn(
+        'state store instances refresh failed; using cached instances',
+        {
+          event: 'state_store.instances_cache',
+          outcome: 'refresh_failed_using_cache',
+          upstreamCount: currentCache.upstreams.length,
+          cacheAgeMs: Date.now() - currentCache.updatedAtMs,
+          refreshIntervalSeconds: config.instancesRefreshIntervalSeconds,
+          refreshDurationMs: Date.now() - startedAt,
+          ...errorProps(e),
+        },
+      )
+      return undefined
+    } finally {
+      instancesRefreshPromise = undefined
+    }
+  })()
+
+  return instancesRefreshPromise
+}
+
+// 优先复用内存缓存；缓存超过刷新间隔时后台刷新，只有完全无缓存且读取失败时才 fallback。
+export async function getUpstreams(
+  store: StateStore,
+  options: GetUpstreamsOptions = {},
+): Promise<string[]> {
+  const nowMs = Date.now()
+  // 命中内存缓存时立即返回快照；若缓存过期，则通过 waitUntil 在后台刷新。
+  if (instancesCache) {
+    const cacheAgeMs = nowMs - instancesCache.updatedAtMs
+    const refreshIntervalMs = config.instancesRefreshIntervalSeconds * 1000
+    if (cacheAgeMs >= refreshIntervalMs) {
+      const refreshPromise = ensureInstancesRefresh(store, instancesCache)
+      options.waitUntil?.(refreshPromise)
+    }
+    return [...instancesCache.upstreams]
   }
 
   try {
-    await store.setInstances(config.fallbackUpstreams)
+    return await readInstancesFromStore(store)
   } catch (e) {
-    upstreamLogger.warn('state store instances seed failed; using fallback', {
-      event: 'state_store.instances',
-      outcome: 'seed_failed',
-      ...errorProps(e),
-    })
+    upstreamLogger.warn(
+      'state store instances cache miss failed; using fallback',
+      {
+        event: 'state_store.instances_cache',
+        outcome: 'miss_failed_using_fallback',
+        upstreamCount: config.fallbackUpstreams.length,
+        refreshIntervalSeconds: config.instancesRefreshIntervalSeconds,
+        ...errorProps(e),
+      },
+    )
+    return config.fallbackUpstreams
   }
-  return config.fallbackUpstreams
 }
 
 // 在后台写入失败标记；写入异常只记录 warning，不能影响当前请求响应。
@@ -119,7 +198,7 @@ export async function fetchFromUpstream(
   let cacheProbeStartedAt: number | undefined
   let fetchStartedAt: number | undefined
   try {
-    const upstreams = await getUpstreams(store)
+    const upstreams = await getUpstreams(store, { waitUntil })
     const url = new URL(tracedRequest.url)
     const requestPath = url.pathname + url.search
     const pathname = url.pathname

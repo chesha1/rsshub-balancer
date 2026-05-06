@@ -16,6 +16,7 @@ import { recordMetric } from './metrics'
 import { createStateStore } from './store'
 import type { ResponseSnapshot } from './types'
 import {
+  cacheInstances,
   fetchFromUpstream,
   fetchRemoteInstances,
   getUpstreams,
@@ -94,11 +95,15 @@ app.use(
 )
 
 app.all('/', async (c) => {
-  const upstreams = await getUpstreams(createStateStore(c.env))
+  const upstreams = await getUpstreams(createStateStore(c.env), {
+    waitUntil: (p) => c.executionCtx.waitUntil(p),
+  })
   return c.html(renderHome(upstreams))
 })
 app.get('/healthz', async (c) => {
-  const upstreams = await getUpstreams(createStateStore(c.env))
+  const upstreams = await getUpstreams(createStateStore(c.env), {
+    waitUntil: (p) => c.executionCtx.waitUntil(p),
+  })
   try {
     await Promise.any(
       upstreams.map(async (u) => {
@@ -122,7 +127,9 @@ app.get('/api/route/status', async (c) => {
     return c.text('Missing requestPath parameter', 400)
   }
 
-  const upstreams = await getUpstreams(createStateStore(c.env))
+  const upstreams = await getUpstreams(createStateStore(c.env), {
+    waitUntil: (p) => c.executionCtx.waitUntil(p),
+  })
   try {
     const response = await Promise.any(
       upstreams.map(async (upstream) => {
@@ -335,6 +342,7 @@ export default {
         return
       }
       await stateStore.setInstances(healthy)
+      cacheInstances(healthy)
       cronLogger.info('scheduled refresh updated upstream instances', {
         event: 'cron.refresh',
         outcome: 'updated',
