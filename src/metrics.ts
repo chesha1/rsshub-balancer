@@ -26,6 +26,7 @@ type RecordMetricOptions = {
   reason?: MetricsReason
   status?: number
   durationMs?: number
+  upstream?: string
 }
 
 // 将合并收益事件写入 Analytics Engine；写入失败只记录日志，不能影响主请求。
@@ -38,11 +39,20 @@ export function recordMetric(
   const reason = options.reason ?? 'none'
   const status = options.status === undefined ? 'none' : String(options.status)
   const durationMs = options.durationMs ?? 0
+  const upstream = options.upstream ?? 'none'
 
   try {
     metrics.writeDataPoint({
       indexes: ['global'],
-      blobs: [options.metric, options.layer, role, method, reason, status],
+      blobs: [
+        options.metric,
+        options.layer,
+        role,
+        method,
+        reason,
+        status,
+        upstream,
+      ],
       doubles: [1, durationMs],
     })
   } catch (e) {
@@ -55,6 +65,7 @@ export function recordMetric(
       method,
       reason,
       status,
+      upstream,
       ...errorProps(e),
     })
   }

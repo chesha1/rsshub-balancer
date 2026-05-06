@@ -20,6 +20,11 @@ type UpstreamLogContext = {
   degradeError?: Record<string, unknown>
 }
 
+export type UpstreamFetchResult = {
+  response: Response
+  upstream?: string
+}
+
 // 从 GitHub 获取远程实例列表
 export async function fetchRemoteInstances(): Promise<string[]> {
   const res = await fetch(
@@ -87,13 +92,13 @@ async function markFailedUpstreamInBackground(
   }
 }
 
-// 按优先级依次尝试上游实例，返回首个成功响应；全部失败时返回 502
+// 按优先级依次尝试上游实例，返回首个成功响应和最终触达的上游；全部失败时返回 502。
 export async function fetchFromUpstream(
   request: Request,
   store: StateStore,
   waitUntil: (p: Promise<unknown>) => void,
   logContext: UpstreamLogContext = {},
-): Promise<Response> {
+): Promise<UpstreamFetchResult> {
   const tracedRequest = withRequestId(request)
   const startedAt = Date.now()
   let phase: UpstreamPhase = 'prepare'
@@ -234,7 +239,10 @@ export async function fetchFromUpstream(
             fallbackUsed: fallbackAttemptCount > 0,
             ...logContext,
           })
-          return withResponseRequestId(res)
+          return {
+            response: withResponseRequestId(res),
+            upstream: finalUpstreamHost,
+          }
         }
       } catch {}
       // 仅在当前路由尚未标记该上游失败时才写入，减少重复状态存储写入。
@@ -273,12 +281,15 @@ export async function fetchFromUpstream(
       fallbackUsed: fallbackAttemptCount > 0,
       ...logContext,
     })
-    return withResponseRequestId(
-      new Response('All upstreams failed to handle this request', {
-        status: 502,
-        headers: { 'content-type': 'text/plain; charset=UTF-8' },
-      }),
-    )
+    return {
+      response: withResponseRequestId(
+        new Response('All upstreams failed to handle this request', {
+          status: 502,
+          headers: { 'content-type': 'text/plain; charset=UTF-8' },
+        }),
+      ),
+      upstream: finalUpstreamHost,
+    }
   } catch (e) {
     if (phase === 'prepare') {
       prepareDurationMs = Date.now() - startedAt
@@ -312,11 +323,14 @@ export async function fetchFromUpstream(
       fallbackUsed: fallbackAttemptCount > 0,
       ...errorProps(e),
     })
-    return withResponseRequestId(
-      new Response('Internal error', {
-        status: 502,
-        headers: { 'content-type': 'text/plain; charset=UTF-8' },
-      }),
-    )
+    return {
+      response: withResponseRequestId(
+        new Response('Internal error', {
+          status: 502,
+          headers: { 'content-type': 'text/plain; charset=UTF-8' },
+        }),
+      ),
+      upstream: finalUpstreamHost,
+    }
   }
 }

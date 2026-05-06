@@ -158,12 +158,13 @@ app.all('/*', async (c) => {
 
   // GET/HEAD 是安全方法，参与两级请求合并；其他方法直接转发上游并返回原始 Response。
   if (method !== 'GET' && method !== 'HEAD') {
-    const res = await fetchFromUpstream(
+    const result = await fetchFromUpstream(
       request,
       stateStore,
       // 把失败标记等后台写入交给 waitUntil，避免阻塞当前响应。
       (p) => c.executionCtx.waitUntil(p),
     )
+    const { response: res } = result
     const durationMs = Date.now() - startedAt
     recordMetric(c.env.METRICS, {
       metric: 'route_request',
@@ -179,6 +180,7 @@ app.all('/*', async (c) => {
       reason: 'non_get',
       status: res.status,
       durationMs,
+      upstream: result.upstream,
     })
     return res
   }
@@ -209,7 +211,7 @@ app.all('/*', async (c) => {
           const stub = c.env.DO.get(id)
           return await stub.coalesce(withRequestId(request))
         } catch (e) {
-          const res = await fetchFromUpstream(
+          const result = await fetchFromUpstream(
             request,
             stateStore,
             // 降级直连上游时，仍然沿用同一个 waitUntil 提交后台任务。
@@ -220,7 +222,7 @@ app.all('/*', async (c) => {
               degradeError: errorProps(e),
             },
           )
-          const snapshot = await fromResponse(res)
+          const snapshot = await fromResponse(result.response)
           recordMetric(c.env.METRICS, {
             metric: 'direct_upstream',
             layer: 'isolate',
@@ -229,6 +231,7 @@ app.all('/*', async (c) => {
             reason: 'do_rpc_failed',
             status: snapshot.status,
             durationMs: Date.now() - startedAt,
+            upstream: result.upstream,
           })
           return snapshot
         }

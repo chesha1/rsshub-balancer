@@ -30,7 +30,7 @@
 
 # 其他
 
-- [ ] 多写一个 label，统计各 upstream 的请求占比
+- [x] 多写一个 label，统计各 upstream 的请求占比
 - [ ] 解决 get instances 超时问题
 - [ ] 减少对 DO 的使用
 - [ ] 实现前端页面

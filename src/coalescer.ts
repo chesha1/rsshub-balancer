@@ -6,10 +6,15 @@ import type { ResponseSnapshot } from './types'
 import { fetchFromUpstream } from './upstream'
 import { fromResponse } from './utils'
 
+type CoalescedResponse = {
+  snapshot: ResponseSnapshot
+  upstream?: string
+}
+
 export class RequestCoalescer extends DurableObject<CloudflareBindings> {
   // DO 级请求合并：key 为 method + requestPath，value 为正在进行的上游解析 promise。
   // 跨 isolate 的同路径同方法并发 GET/HEAD 请求在此合并，leader 完成后条目自动清除。
-  private inflight = new Map<string, Promise<ResponseSnapshot>>()
+  private inflight = new Map<string, Promise<CoalescedResponse>>()
 
   async coalesce(request: Request): Promise<ResponseSnapshot> {
     const requestId = getRequestId(request)
@@ -46,14 +51,17 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
         event: 'coalesce.join',
         coalesceRole,
       })
-      promise = (async (): Promise<ResponseSnapshot> => {
+      promise = (async (): Promise<CoalescedResponse> => {
         try {
-          const res = await fetchFromUpstream(
+          const result = await fetchFromUpstream(
             request,
             createStateStore(this.env),
             (p) => this.ctx.waitUntil(p),
           )
-          return await fromResponse(res)
+          return {
+            snapshot: await fromResponse(result.response),
+            upstream: result.upstream,
+          }
         } finally {
           this.inflight.delete(coalesceKey)
         }
@@ -61,7 +69,8 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
       this.inflight.set(coalesceKey, promise)
     }
 
-    const snapshot = await promise
+    const result = await promise
+    const { snapshot } = result
     const durationMs = Date.now() - startedAt
     recordMetric(this.env.METRICS, {
       metric: 'coalesce_role',
@@ -91,6 +100,7 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
         reason: 'do_leader',
         status: snapshot.status,
         durationMs,
+        upstream: result.upstream,
       })
     }
     coalescerLogger.info('durable object coalescing completed', {
