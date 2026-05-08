@@ -22,6 +22,7 @@
 
 ### 后续排查方向
 
+- 按 [Redis timeout 根因定位方案](./redis-timeout-root-cause-plan.md) 拆分 connect、command、client lifecycle 和 runtime warning 日志，先确认底层原因。
 - 捕获 `process.on('warning')`，临时记录 `MaxListenersExceededWarning` 的 `stack`、`emitter.constructor.name`、`type`、`count`，确认栈是否指向 `@redis/client/dist/lib/client/socket.js`。
 - 给 Redis 客户端补充临时生命周期日志，包括 connect start / ok / failed、command start / ok / failed / timeout、client destroy，并带上 operation、durationMs、inflight 计数和 requestId。
 - 对照 Redis / Valkey 服务端指标，重点查看连接数波动、连接拒绝数、慢日志、命令延迟和网络延迟。

@@ -7,6 +7,7 @@ import { renderHome } from './home'
 import {
   cronLogger,
   errorProps,
+  getRequestLogContext,
   httpLogger,
   withRequestId,
   withRequestLogContext,
@@ -72,7 +73,14 @@ app.use(
 // 把 requestId、method、path 绑定到当前异步请求上下文，后续任意 logger 都能自动复用。
 app.use(async (c, next) => {
   const requestId = c.get('requestId')
-  await withRequestLogContext(requestId, next)
+  await withRequestLogContext(
+    {
+      requestId,
+      layer: 'edge',
+      ...getRequestLogContext(c.req.raw),
+    },
+    next,
+  )
 })
 
 // 统一记录入口访问日志；健康检查和 Cloudflare 自带探针路径默认跳过，减少噪音。

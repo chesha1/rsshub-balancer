@@ -11,6 +11,20 @@ import {
 // 这里暂时还是继续使用 `X-Request-Id`，优先保持实现简单、可读和兼容现有习惯。
 export const REQUEST_ID_HEADER = 'X-Request-Id'
 
+type RequestLogContext = Record<string, unknown> & {
+  requestId?: string
+  requestMethod?: string
+  requestPath?: string
+  cfColo?: string
+  cfCountry?: string
+}
+
+type RuntimeWarning = Error & {
+  emitter?: unknown
+  type?: string
+  count?: number
+}
+
 // 仅把 Error 规范化为结构化日志友好的对象，保留 message/name/stack，
 // 并递归展开 cause 与 AggregateError.errors；其它值交给调用方原样处理。
 function normalizeError(
@@ -114,13 +128,70 @@ export const coalescerLogger = rootLogger.getChild('coalescer')
 export const metricsLogger = rootLogger.getChild('metrics')
 export const cronLogger = rootLogger.getChild('cron')
 export const storeLogger = rootLogger.getChild('store')
+export const runtimeLogger = rootLogger.getChild('runtime')
+
+let runtimeWarningLoggerRegistered = false
+
+// 提取 Cloudflare 请求元信息，给 Redis 等跨模块日志补充区域和路由上下文。
+export function getRequestLogContext(request: Request): RequestLogContext {
+  const url = new URL(request.url)
+  const cf = request.cf as Record<string, unknown> | undefined
+  const context: RequestLogContext = {
+    requestMethod: request.method,
+    requestPath: url.pathname + url.search,
+  }
+
+  if (typeof cf?.colo === 'string') context.cfColo = cf.colo
+  if (typeof cf?.country === 'string') context.cfCountry = cf.country
+
+  return context
+}
+
+// 从 Node warning 对象中提取 EventEmitter 诊断字段，避免日志里直接展开复杂对象。
+function warningProps(warning: RuntimeWarning): Record<string, unknown> {
+  const emitter = warning.emitter
+  const emitterName =
+    emitter && typeof emitter === 'object'
+      ? emitter.constructor?.name
+      : undefined
+
+  return {
+    warningName: warning.name,
+    warningMessage: warning.message,
+    warningStack: warning.stack,
+    emitterName,
+    warningType: warning.type,
+    listenerCount: warning.count,
+  }
+}
+
+// 注册一次 Node runtime warning 捕获，用来定位 MaxListenersExceededWarning 的来源。
+function registerRuntimeWarningLogger(): void {
+  if (runtimeWarningLoggerRegistered) return
+  if (typeof process === 'undefined' || typeof process.on !== 'function') return
+
+  runtimeWarningLoggerRegistered = true
+  process.on('warning', (warning: RuntimeWarning) => {
+    if (warning.name !== 'MaxListenersExceededWarning') return
+
+    runtimeLogger.warn('runtime emitted max listeners warning', {
+      event: 'runtime.warning',
+      outcome: 'max_listeners_exceeded',
+      ...warningProps(warning),
+    })
+  })
+}
+
+registerRuntimeWarningLogger()
 
 // 为当前异步流程绑定 Request ID，后续任意模块 logger 都会自动带上它。
 export function withRequestLogContext<T>(
-  requestId: string,
+  context: string | RequestLogContext,
   callback: () => T,
 ): T {
-  return withContext({ requestId }, callback)
+  const normalizedContext =
+    typeof context === 'string' ? { requestId: context } : context
+  return withContext(normalizedContext, callback)
 }
 
 // 读取当前异步请求上下文里的 Request ID，供 header 透传等非日志场景复用。

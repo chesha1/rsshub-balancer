@@ -1,5 +1,10 @@
 import { DurableObject } from 'cloudflare:workers'
-import { coalescerLogger, getRequestId, withRequestLogContext } from './log'
+import {
+  coalescerLogger,
+  getRequestId,
+  getRequestLogContext,
+  withRequestLogContext,
+} from './log'
 import { recordMetric } from './metrics'
 import { createStateStore } from './store'
 import type { ResponseSnapshot } from './types'
@@ -18,9 +23,13 @@ export class RequestCoalescer extends DurableObject<CloudflareBindings> {
 
   async coalesce(request: Request): Promise<ResponseSnapshot> {
     const requestId = getRequestId(request)
-    if (!requestId) return await this.coalesceWithContext(request)
+    const requestContext = {
+      layer: 'do',
+      ...getRequestLogContext(request),
+      ...(requestId ? { requestId } : {}),
+    }
 
-    return await withRequestLogContext(requestId, async () =>
+    return await withRequestLogContext(requestContext, async () =>
       this.coalesceWithContext(request),
     )
   }

@@ -3,8 +3,21 @@ import { errorProps, storeLogger } from './log'
 
 const INSTANCES_KEY = 'instances'
 const REDIS_COMMAND_TIMEOUT_MS = 2000
+const REDIS_SLOW_COMMAND_LOG_MS = 500
 
 type StateStoreBackend = 'kv' | 'redis'
+type RedisClientCreateReason =
+  | 'missing_client'
+  | 'after_command_timeout'
+  | 'after_connect_failed'
+  | 'url_changed'
+  | 'client_not_ready'
+
+type RedisClientDestroyReason =
+  | 'command_timeout'
+  | 'url_changed'
+  | 'client_not_ready'
+  | 'connect_failed'
 
 type StateStoreEnv = {
   KV: KVNamespace
@@ -32,9 +45,27 @@ type RedisClientWithEvents = RedisClient & {
   on(event: 'error', listener: (error: Error) => void): void
 }
 
+type RedisClientDiagnostics = {
+  generation: number
+  createdAtMs: number
+  readyAtMs?: number
+  commandCount: number
+  timedOutCommandCount: number
+  commandInFlight: number
+  lastOperation?: string
+  lastCommandStartedAtMs?: number
+}
+
 let redisClient: RedisClient | undefined
 let redisClientUrl: string | undefined
 let redisConnectPromise: Promise<RedisClient> | undefined
+let redisClientGeneration = 0
+let redisLastDestroyReason: RedisClientDestroyReason | undefined
+
+const redisClientDiagnostics = new WeakMap<
+  RedisClient,
+  RedisClientDiagnostics
+>()
 
 class RedisCommandTimeoutError extends Error {
   // 构造可被日志识别的 Redis 单命令超时错误。
@@ -90,6 +121,56 @@ function getStateStoreBackend(
   return 'kv'
 }
 
+// 汇总当前 Redis client 的生命周期计数，保持各类日志字段命名一致。
+function redisClientDiagnosticProps(
+  client: RedisClient,
+  diagnostics = redisClientDiagnostics.get(client),
+): Record<string, unknown> {
+  const nowMs = Date.now()
+  return {
+    clientGeneration: diagnostics?.generation,
+    ageMs: diagnostics ? nowMs - diagnostics.createdAtMs : undefined,
+    readyAgeMs:
+      diagnostics?.readyAtMs === undefined
+        ? undefined
+        : nowMs - diagnostics.readyAtMs,
+    commandCount: diagnostics?.commandCount,
+    timedOutCommandCount: diagnostics?.timedOutCommandCount,
+    commandInFlight: diagnostics?.commandInFlight,
+    lastOperation: diagnostics?.lastOperation,
+    lastCommandAgeMs:
+      diagnostics?.lastCommandStartedAtMs === undefined
+        ? undefined
+        : nowMs - diagnostics.lastCommandStartedAtMs,
+    isReady: client.isReady,
+  }
+}
+
+// 为新建 Redis client 分配 generation，并记录创建时的诊断基线。
+function registerRedisClientDiagnostics(
+  client: RedisClient,
+  reason: RedisClientCreateReason,
+): RedisClientDiagnostics {
+  const diagnostics: RedisClientDiagnostics = {
+    generation: redisClientGeneration + 1,
+    createdAtMs: Date.now(),
+    commandCount: 0,
+    timedOutCommandCount: 0,
+    commandInFlight: 0,
+  }
+  redisClientGeneration = diagnostics.generation
+  redisClientDiagnostics.set(client, diagnostics)
+
+  storeLogger.info('redis client created', {
+    event: 'state_store.redis.client',
+    outcome: 'created',
+    reason,
+    ...redisClientDiagnosticProps(client, diagnostics),
+  })
+
+  return diagnostics
+}
+
 // 创建一个 Redis 客户端实例，集中约束边缘请求路径上的连接和排队行为。
 function createRedisClient(valkeyUrl: string): RedisClient {
   const client = createClient({
@@ -105,8 +186,9 @@ function createRedisClient(valkeyUrl: string): RedisClient {
   // node-redis 的 error 事件必须被消费，否则后台连接错误可能变成未处理异常。
   client.on('error', (error: Error) => {
     storeLogger.warn('redis client emitted an error', {
-      event: 'state_store.redis',
-      outcome: 'client_error',
+      event: 'state_store.redis.client',
+      outcome: 'error',
+      ...redisClientDiagnosticProps(client),
       ...errorProps(error),
     })
   })
@@ -115,18 +197,33 @@ function createRedisClient(valkeyUrl: string): RedisClient {
 }
 
 // Redis 命令超时后销毁当前连接，避免后续请求继续复用已卡住的 client。
-function destroyRedisClient(client: RedisClient): void {
+function destroyRedisClient(
+  client: RedisClient,
+  reason: RedisClientDestroyReason,
+  operation?: string,
+): void {
   try {
     client.destroy()
+    storeLogger.info('redis client destroyed', {
+      event: 'state_store.redis.client',
+      outcome: 'destroyed',
+      reason,
+      operation,
+      ...redisClientDiagnosticProps(client),
+    })
   } catch (error) {
-    storeLogger.warn('redis client destroy failed after command timeout', {
-      event: 'state_store.redis',
+    storeLogger.warn('redis client destroy failed', {
+      event: 'state_store.redis.client',
       outcome: 'destroy_failed',
+      reason,
+      operation,
+      ...redisClientDiagnosticProps(client),
       ...errorProps(error),
     })
   }
 
   if (redisClient === client) {
+    redisLastDestroyReason = reason
     redisClient = undefined
     redisClientUrl = undefined
     redisConnectPromise = undefined
@@ -139,19 +236,48 @@ async function runRedisCommandWithTimeout<T>(
   operation: string,
   runCommand: () => Promise<T>,
 ): Promise<T> {
+  const diagnostics = redisClientDiagnostics.get(client)
+  const startedAtMs = Date.now()
+  const clientReadyAtStart = client.isReady
+  const isFirstCommandOnClient = diagnostics?.commandCount === 0
+  if (diagnostics) {
+    diagnostics.commandCount += 1
+    diagnostics.commandInFlight += 1
+    diagnostics.lastOperation = operation
+    diagnostics.lastCommandStartedAtMs = startedAtMs
+  }
+
+  storeLogger.debug('redis command started', {
+    event: 'state_store.redis.command',
+    outcome: 'started',
+    operation,
+    timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
+    clientReadyAtStart,
+    isFirstCommandOnClient,
+    ...redisClientDiagnosticProps(client, diagnostics),
+  })
+
   let timeoutId: ReturnType<typeof setTimeout> | undefined
+  let timedOut = false
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      destroyRedisClient(client)
+      timedOut = true
+      if (diagnostics) diagnostics.timedOutCommandCount += 1
       const error = new RedisCommandTimeoutError(
         operation,
         REDIS_COMMAND_TIMEOUT_MS,
       )
+      const durationMs = Date.now() - startedAtMs
+      destroyRedisClient(client, 'command_timeout', operation)
       storeLogger.warn('redis command timed out; falling back', {
-        event: 'state_store.redis',
-        outcome: 'command_timeout',
+        event: 'state_store.redis.command',
+        outcome: 'timed_out',
         operation,
+        durationMs,
         timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
+        clientReadyAtStart,
+        isFirstCommandOnClient,
+        ...redisClientDiagnosticProps(client, diagnostics),
         ...errorProps(error),
       })
       reject(error)
@@ -159,9 +285,42 @@ async function runRedisCommandWithTimeout<T>(
   })
 
   try {
-    return await Promise.race([runCommand(), timeoutPromise])
+    const result = await Promise.race([runCommand(), timeoutPromise])
+    const durationMs = Date.now() - startedAtMs
+    if (durationMs >= REDIS_SLOW_COMMAND_LOG_MS) {
+      storeLogger.info('redis slow command succeeded', {
+        event: 'state_store.redis.command',
+        outcome: 'succeeded',
+        slow: true,
+        operation,
+        durationMs,
+        timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
+        clientReadyAtStart,
+        isFirstCommandOnClient,
+        ...redisClientDiagnosticProps(client, diagnostics),
+      })
+    }
+    return result
+  } catch (error) {
+    if (!timedOut) {
+      storeLogger.warn('redis command failed', {
+        event: 'state_store.redis.command',
+        outcome: 'failed',
+        operation,
+        durationMs: Date.now() - startedAtMs,
+        timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
+        clientReadyAtStart,
+        isFirstCommandOnClient,
+        ...redisClientDiagnosticProps(client, diagnostics),
+        ...errorProps(error),
+      })
+    }
+    throw error
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
+    if (diagnostics) {
+      diagnostics.commandInFlight = Math.max(0, diagnostics.commandInFlight - 1)
+    }
   }
 }
 
@@ -174,36 +333,99 @@ async function getRedisClient(
   }
 
   if (redisClient && redisClientUrl === valkeyUrl && redisClient.isReady) {
+    storeLogger.debug('redis ready client reused', {
+      event: 'state_store.redis.connect',
+      outcome: 'reused_ready',
+      reason: 'ready_client',
+      hasExistingClient: true,
+      hasConnectPromise: Boolean(redisConnectPromise),
+      ...redisClientDiagnosticProps(redisClient),
+    })
     return redisClient
   }
 
   if (redisConnectPromise && redisClientUrl === valkeyUrl) {
+    storeLogger.info('redis connect already in progress', {
+      event: 'state_store.redis.connect',
+      outcome: 'joined_existing',
+      reason: 'connect_in_progress',
+      hasExistingClient: Boolean(redisClient),
+      hasConnectPromise: true,
+      ...(redisClient ? redisClientDiagnosticProps(redisClient) : {}),
+    })
     return await redisConnectPromise
   }
 
+  const hadExistingClient = Boolean(redisClient)
+  const hadConnectPromise = Boolean(redisConnectPromise)
+  let createReason: RedisClientCreateReason =
+    redisLastDestroyReason === 'command_timeout'
+      ? 'after_command_timeout'
+      : redisLastDestroyReason === 'connect_failed'
+        ? 'after_connect_failed'
+        : 'missing_client'
   if (redisClient) {
-    redisClient.destroy()
-    redisClient = undefined
-    redisClientUrl = undefined
+    createReason =
+      redisClientUrl === valkeyUrl ? 'client_not_ready' : 'url_changed'
+    destroyRedisClient(redisClient, createReason)
   }
 
   const client = createRedisClient(valkeyUrl)
+  const diagnostics = registerRedisClientDiagnostics(client, createReason)
   redisClient = client
   redisClientUrl = valkeyUrl
-  redisConnectPromise = (async () => {
+  redisLastDestroyReason = undefined
+  const connectStartedAtMs = Date.now()
+  storeLogger.info('redis connect started', {
+    event: 'state_store.redis.connect',
+    outcome: 'started',
+    reason: createReason,
+    hasExistingClient: hadExistingClient,
+    hasConnectPromise: hadConnectPromise,
+    ...redisClientDiagnosticProps(client, diagnostics),
+  })
+
+  let connectPromise: Promise<RedisClient> | undefined
+  connectPromise = (async () => {
     try {
       await client.connect()
+      diagnostics.readyAtMs = Date.now()
+      storeLogger.info('redis connect succeeded', {
+        event: 'state_store.redis.connect',
+        outcome: 'succeeded',
+        reason: createReason,
+        durationMs: Date.now() - connectStartedAtMs,
+        hasExistingClient: redisClient === client,
+        hasConnectPromise: true,
+        ...redisClientDiagnosticProps(client, diagnostics),
+      })
+      storeLogger.info('redis client ready', {
+        event: 'state_store.redis.client',
+        outcome: 'ready',
+        reason: createReason,
+        ...redisClientDiagnosticProps(client, diagnostics),
+      })
       return client
     } catch (error) {
-      if (redisClient === client) {
-        redisClient = undefined
-        redisClientUrl = undefined
-      }
+      storeLogger.warn('redis connect failed', {
+        event: 'state_store.redis.connect',
+        outcome: 'failed',
+        reason: createReason,
+        durationMs: Date.now() - connectStartedAtMs,
+        hasExistingClient: redisClient === client,
+        hasConnectPromise: true,
+        ...redisClientDiagnosticProps(client, diagnostics),
+        ...errorProps(error),
+      })
+      destroyRedisClient(client, 'connect_failed')
       throw error
     } finally {
-      redisConnectPromise = undefined
+      if (connectPromise && redisConnectPromise === connectPromise) {
+        redisConnectPromise = undefined
+      }
     }
   })()
+  redisConnectPromise = connectPromise
 
   return await redisConnectPromise
 }
