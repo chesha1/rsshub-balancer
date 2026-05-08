@@ -14,6 +14,7 @@ export type MetricsReason =
   | 'non_get'
   | 'do_leader'
   | 'do_rpc_failed'
+  | 'do_sampled_out'
   | 'isolate_follower'
   | 'do_follower'
   | 'none'

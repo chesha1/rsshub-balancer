@@ -12,7 +12,7 @@
 | `blob2` | `layer` | `edge` / `isolate` / `do` | 指标发生的层级 |
 | `blob3` | `role` | `leader` / `follower` / `none` | 请求在合并流程中的角色；不适用时为 `none` |
 | `blob4` | `method` | 实际 HTTP method，例如 `GET` / `HEAD` / `POST` | 入口请求方法 |
-| `blob5` | `reason` | `non_get` / `do_leader` / `do_rpc_failed` / `isolate_follower` / `do_follower` / `none` | 记录这条指标的原因；不适用时为 `none` |
+| `blob5` | `reason` | `non_get` / `do_leader` / `do_rpc_failed` / `do_sampled_out` / `isolate_follower` / `do_follower` / `none` | 记录这条指标的原因；不适用时为 `none` |
 | `blob6` | `status` | 响应状态码字符串，例如 `200` / `404` / `503` | 最终返回或被复用响应的 HTTP 状态码 |
 | `blob7` | `upstream` | 实际 upstream URL / `none` | `direct_upstream` 会记录 leader 最终触达的 upstream；其它指标默认 `none` |
 | `double1` | `count` | `1` | 事件计数，查询时用 `sum(_sample_interval * double1)` 统计近似次数 |
@@ -29,6 +29,7 @@
 | `coalesce_role` | `do` | `follower` | `do_follower` | `none` | 请求进入 Durable Object 后复用已有请求 |
 | `direct_upstream` | `edge` | `none` | `non_get` | 实际 upstream URL | 非 GET/HEAD 请求直接转发上游 |
 | `direct_upstream` | `isolate` | `leader` | `do_rpc_failed` | 实际 upstream URL | Durable Object RPC 失败后在 isolate 降级直连上游 |
+| `direct_upstream` | `isolate` | `leader` | `do_sampled_out` | 实际 upstream URL | Durable Object 随机抽样未命中后在 isolate 直连上游 |
 | `direct_upstream` | `do` | `leader` | `do_leader` | 实际 upstream URL | Durable Object leader 真实请求上游 |
 | `benefited` | `isolate` | `follower` | `isolate_follower` | `none` | isolate follower 复用结果，节省一次上游请求 |
 | `benefited` | `do` | `follower` | `do_follower` | `none` | Durable Object follower 复用结果，节省一次上游请求 |
@@ -37,12 +38,14 @@
 
 这个 SQL 统计最近 24 小时的合并收益，适合直接给饼图或环图使用。
 
-- `direct_total`：真实打到上游的请求数，包括 DO leader、非 GET/HEAD 直连、DO RPC 失败后的降级直连
+- `direct_total`：真实打到上游的请求数，包括 DO leader、非 GET/HEAD 直连、DO RPC 失败后的降级直连、DO 抽样未命中后的 isolate 直连
 - `isolate_benefited_total`：在同一个 Worker isolate 内复用已有请求结果的 follower 数
-- `do_benefited_total`：跨 isolate 进入 Durable Object 后复用已有请求结果的 follower 数
+- `do_benefited_total`：跨 isolate 进入 Durable Object 后复用已有请求结果的 follower 数；启用 DO 抽样后，它只表示实际进入 DO 的抽样流量中产生的收益
 - `benefited_total`：两层合并一共节省的请求数
 - `total`：`direct_total + benefited_total`，也就是参与这张图统计的总请求数
 - `*_percent`：各分类在 `total` 中的占比，保留两位小数
+
+注意：启用入口随机抽样降 DO 后，`do_sampled_out` 会被计入 `direct_total`。因此 `do_benefited_percent` 会随抽样比例下降，不能直接和抽样前的 DO 收益占比比较；刚上线后的最近 24 小时窗口也会混合抽样前后的数据，建议等完整 24 小时后再看稳定口径。
 
 ```sql
 SELECT

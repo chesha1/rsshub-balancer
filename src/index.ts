@@ -30,6 +30,9 @@ export { RequestCoalescer } from './coalescer'
 // 同一 isolate 内对同一路径同方法的并发 GET/HEAD 请求共享同一个 promise，leader 完成后条目自动清除。
 const inflight = new Map<string, Promise<ResponseSnapshot>>()
 
+// 临时降低 Durable Object 参与比例，先保留少量样本观察 Redis timeout 变化。
+const DO_SAMPLE_RATE = 0.01
+
 // 这些路径会频繁被探测或访问，保留路由行为但默认不写入口访问日志。
 const quietAccessLogExactPaths = new Set([
   '/healthz',
@@ -221,35 +224,44 @@ app.all('/*', async (c) => {
     })
     promise = (async (): Promise<ResponseSnapshot> => {
       try {
-        try {
-          const id = c.env.DO.idFromName(coalesceKey)
-          const stub = c.env.DO.get(id)
-          return await stub.coalesce(withRequestId(request))
-        } catch (e) {
-          const result = await fetchFromUpstream(
-            request,
-            stateStore,
-            // 降级直连上游时，仍然沿用同一个 waitUntil 提交后台任务。
-            (p) => c.executionCtx.waitUntil(p),
-            {
-              degradedToDirect: true,
-              degradeReason: 'do_rpc_failed',
-              degradeError: errorProps(e),
-            },
-          )
-          const snapshot = await fromResponse(result.response)
-          recordMetric(c.env.METRICS, {
-            metric: 'direct_upstream',
-            layer: 'isolate',
-            role: 'leader',
-            method,
-            reason: 'do_rpc_failed',
-            status: snapshot.status,
-            durationMs: Date.now() - startedAt,
-            upstream: result.upstream,
-          })
-          return snapshot
+        let directReason: 'do_sampled_out' | 'do_rpc_failed' = 'do_sampled_out'
+        let degradeError: Record<string, unknown> | undefined
+
+        // 只让少量 isolate leader 继续进入 DO，用最小改动降低 DO 内 Redis 访问压力。
+        if (Math.random() < DO_SAMPLE_RATE) {
+          try {
+            const id = c.env.DO.idFromName(coalesceKey)
+            const stub = c.env.DO.get(id)
+            return await stub.coalesce(withRequestId(request))
+          } catch (e) {
+            directReason = 'do_rpc_failed'
+            degradeError = errorProps(e)
+          }
         }
+
+        const result = await fetchFromUpstream(
+          request,
+          stateStore,
+          // 降级直连上游时，仍然沿用同一个 waitUntil 提交后台任务。
+          (p) => c.executionCtx.waitUntil(p),
+          {
+            degradedToDirect: true,
+            degradeReason: directReason,
+            ...(degradeError ? { degradeError } : {}),
+          },
+        )
+        const snapshot = await fromResponse(result.response)
+        recordMetric(c.env.METRICS, {
+          metric: 'direct_upstream',
+          layer: 'isolate',
+          role: 'leader',
+          method,
+          reason: directReason,
+          status: snapshot.status,
+          durationMs: Date.now() - startedAt,
+          upstream: result.upstream,
+        })
+        return snapshot
       } finally {
         inflight.delete(coalesceKey)
       }
