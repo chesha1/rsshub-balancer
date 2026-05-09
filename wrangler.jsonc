@@ -6,8 +6,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "vars": {
-    // 可选值：redis 使用外部 Redis / Aiven Valkey；kv 回滚到 Cloudflare KV。
-    "STATE_STORE_BACKEND": "redis"
+    // 可选值：redis 直连外部 Redis / Aiven Valkey；redis-http 通过 HTTP proxy；kv 回滚到 Cloudflare KV。
+    "STATE_STORE_BACKEND": "redis-http"
   },
   "routes": [
     {

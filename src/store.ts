@@ -1,11 +1,13 @@
 import { createClient } from '@redis/client'
+import { Redis } from '@upstash/redis/cloudflare'
 import { errorProps, storeLogger } from './log'
 
 const INSTANCES_KEY = 'instances'
 const REDIS_COMMAND_TIMEOUT_MS = 2000
 const REDIS_SLOW_COMMAND_LOG_MS = 500
+const REDIS_HTTP_PARSE_ERROR_PREFIX = 'Unable to parse response body: '
 
-type StateStoreBackend = 'kv' | 'redis'
+type StateStoreBackend = 'kv' | 'redis' | 'redis-http'
 type RedisClientCreateReason =
   | 'missing_client'
   | 'after_command_timeout'
@@ -23,6 +25,10 @@ type StateStoreEnv = {
   KV: KVNamespace
   STATE_STORE_BACKEND?: string
   VALKEY_URL?: string
+  REDIS_HTTP_URL?: string
+  REDIS_HTTP_TOKEN?: string
+  UPSTASH_REDIS_REST_URL?: string
+  UPSTASH_REDIS_REST_TOKEN?: string
 }
 
 type RedisSetOptions = {
@@ -56,11 +62,20 @@ type RedisClientDiagnostics = {
   lastCommandStartedAtMs?: number
 }
 
+type RedisHttpConfig = {
+  url: string
+  token: string
+  source: 'redis_http' | 'upstash_env'
+}
+
 let redisClient: RedisClient | undefined
 let redisClientUrl: string | undefined
 let redisConnectPromise: Promise<RedisClient> | undefined
 let redisClientGeneration = 0
 let redisLastDestroyReason: RedisClientDestroyReason | undefined
+let redisHttpClient: Redis | undefined
+let redisHttpClientUrl: string | undefined
+let redisHttpClientToken: string | undefined
 
 const redisClientDiagnostics = new WeakMap<
   RedisClient,
@@ -89,13 +104,18 @@ export type StateStore = {
   ): Promise<void>
 }
 
-// 解析实例列表 JSON，保持与原 KV 版本一致的轻量非空判断。
-function parseInstances(raw: string | null): string[] | undefined {
+// 解析实例列表，兼容 Redis 原始 JSON 字符串和 HTTP SDK 已反序列化后的数组。
+function parseInstances(raw: string | string[] | null): string[] | undefined {
   if (!raw) return undefined
+
+  if (Array.isArray(raw)) {
+    if (raw.length > 0) return raw
+    return undefined
+  }
 
   try {
     const list = JSON.parse(raw) as string[]
-    if (list.length > 0) return list
+    if (Array.isArray(list) && list.length > 0) return list
   } catch {}
 
   return undefined
@@ -110,7 +130,13 @@ function failedUpstreamKey(upstream: string, pathname: string): string {
 function getStateStoreBackend(
   rawBackend: string | undefined,
 ): StateStoreBackend {
-  if (rawBackend === 'redis' || rawBackend === 'kv') return rawBackend
+  if (
+    rawBackend === 'redis' ||
+    rawBackend === 'redis-http' ||
+    rawBackend === 'kv'
+  ) {
+    return rawBackend
+  }
   if (rawBackend === undefined || rawBackend === '') return 'kv'
 
   storeLogger.warn('unknown state store backend; falling back to kv', {
@@ -119,6 +145,133 @@ function getStateStoreBackend(
     configuredBackend: rawBackend,
   })
   return 'kv'
+}
+
+// 读取 Redis HTTP proxy 配置，并兼容 Upstash 官方环境变量名称以方便后续切换。
+function getRedisHttpConfig(env: StateStoreEnv): RedisHttpConfig {
+  const url = env.REDIS_HTTP_URL ?? env.UPSTASH_REDIS_REST_URL
+  const token = env.REDIS_HTTP_TOKEN ?? env.UPSTASH_REDIS_REST_TOKEN
+  if (!url || !token) {
+    throw new Error(
+      'REDIS_HTTP_URL and REDIS_HTTP_TOKEN are required when STATE_STORE_BACKEND=redis-http',
+    )
+  }
+
+  return {
+    url,
+    token,
+    source: env.REDIS_HTTP_URL ? 'redis_http' : 'upstash_env',
+  }
+}
+
+// 复用轻量 HTTP Redis client；它不维护 Redis TCP 连接，只封装到 proxy 的 fetch 调用。
+function getRedisHttpClient(config: RedisHttpConfig): Redis {
+  if (
+    redisHttpClient &&
+    redisHttpClientUrl === config.url &&
+    redisHttpClientToken === config.token
+  ) {
+    return redisHttpClient
+  }
+
+  redisHttpClient = new Redis({
+    url: config.url,
+    token: config.token,
+    automaticDeserialization: false,
+    enableTelemetry: false,
+    readYourWrites: false,
+    responseEncoding: false,
+    retry: { retries: 0 },
+    signal: () => AbortSignal.timeout(REDIS_COMMAND_TIMEOUT_MS),
+  })
+  redisHttpClientUrl = config.url
+  redisHttpClientToken = config.token
+
+  storeLogger.info('redis http client created', {
+    event: 'state_store.redis_http.client',
+    outcome: 'created',
+    configSource: config.source,
+    timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
+  })
+
+  return redisHttpClient
+}
+
+// 判断 HTTP Redis 请求是否被超时信号中止，用于把日志 outcome 标成 timed_out。
+function isRedisHttpTimeout(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return error.name === 'AbortError' || error.name === 'TimeoutError'
+}
+
+// 展开 HTTP Redis SDK 对非 JSON 错误响应的包装，避免把 proxy 502 误读成业务 JSON 解析失败。
+function redisHttpErrorProps(error: unknown): Record<string, unknown> {
+  const props = errorProps(error)
+  if (!(error instanceof Error)) return props
+  if (error.name !== 'UpstashJSONParseError') return props
+  if (!error.message.startsWith(REDIS_HTTP_PARSE_ERROR_PREFIX)) return props
+
+  const responseBodyPreview = error.message
+    .slice(REDIS_HTTP_PARSE_ERROR_PREFIX.length)
+    .trim()
+  const statusCodeMatch = /^error code:\s*(\d{3})\b/i.exec(responseBodyPreview)
+
+  return {
+    ...props,
+    redisHttpErrorKind: 'non_json_error_response',
+    responseBodyPreview,
+    ...(statusCodeMatch ? { statusCode: Number(statusCodeMatch[1]) } : {}),
+  }
+}
+
+// 给 Redis HTTP 命令记录与直连 Redis 相同粒度的耗时和失败日志。
+async function runRedisHttpCommand<T>(
+  operation: string,
+  runCommand: () => Promise<T>,
+): Promise<T> {
+  const startedAtMs = Date.now()
+  storeLogger.debug('redis http command started', {
+    event: 'state_store.redis_http.command',
+    outcome: 'started',
+    operation,
+    timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
+  })
+
+  try {
+    const result = await runCommand()
+    const durationMs = Date.now() - startedAtMs
+    if (durationMs >= REDIS_SLOW_COMMAND_LOG_MS) {
+      storeLogger.info('redis http slow command succeeded', {
+        event: 'state_store.redis_http.command',
+        outcome: 'succeeded',
+        slow: true,
+        operation,
+        durationMs,
+        timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
+      })
+    }
+    return result
+  } catch (error) {
+    const timedOut = isRedisHttpTimeout(error)
+    const diagnosticProps = redisHttpErrorProps(error)
+    const nonJsonError =
+      diagnosticProps.redisHttpErrorKind === 'non_json_error_response'
+    storeLogger.warn(
+      timedOut
+        ? 'redis http command timed out; falling back'
+        : nonJsonError
+          ? 'redis http proxy returned non-json error response'
+          : 'redis http command failed',
+      {
+        event: 'state_store.redis_http.command',
+        outcome: timedOut ? 'timed_out' : 'failed',
+        operation,
+        durationMs: Date.now() - startedAtMs,
+        timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
+        ...diagnosticProps,
+      },
+    )
+    throw error
+  }
 }
 
 // 汇总当前 Redis client 的生命周期计数，保持各类日志字段命名一致。
@@ -535,9 +688,67 @@ class RedisStateStore implements StateStore {
   }
 }
 
+class RedisHttpStateStore implements StateStore {
+  constructor(private readonly env: StateStoreEnv) {}
+
+  // 从 Redis HTTP proxy 读取上游实例列表，保持与直连 Redis 相同的 key。
+  async getInstances(): Promise<string[] | undefined> {
+    const client = getRedisHttpClient(getRedisHttpConfig(this.env))
+    const raw = await runRedisHttpCommand('get instances', () =>
+      client.get<string>(INSTANCES_KEY),
+    )
+    return parseInstances(raw)
+  }
+
+  // 将上游实例列表整体写入 Redis HTTP proxy，值格式继续使用 JSON 字符串。
+  async setInstances(upstreams: string[]): Promise<void> {
+    const client = getRedisHttpClient(getRedisHttpConfig(this.env))
+    await runRedisHttpCommand('set instances', () =>
+      client.set(INSTANCES_KEY, JSON.stringify(upstreams)),
+    )
+  }
+
+  // 使用 MGET 通过 Redis HTTP proxy 一次性读取当前路由的失败标记。
+  async getFailedUpstreams(
+    upstreams: readonly string[],
+    pathname: string,
+  ): Promise<Set<string>> {
+    if (upstreams.length === 0) return new Set()
+
+    const client = getRedisHttpClient(getRedisHttpConfig(this.env))
+    const keys = upstreams.map((upstream) =>
+      failedUpstreamKey(upstream, pathname),
+    )
+    const values = await runRedisHttpCommand('mget failed upstreams', () =>
+      client.mget<Array<string | null>>(keys),
+    )
+    const failedUpstreams = new Set<string>()
+
+    for (const [index, value] of values.entries()) {
+      if (value) failedUpstreams.add(upstreams[index])
+    }
+    return failedUpstreams
+  }
+
+  // 将某个上游在当前路由上的失败标记写入 Redis HTTP proxy，并设置短 TTL。
+  async markUpstreamFailed(
+    upstream: string,
+    pathname: string,
+    ttlSeconds: number,
+  ): Promise<void> {
+    const client = getRedisHttpClient(getRedisHttpConfig(this.env))
+    await runRedisHttpCommand('set failed upstream marker', () =>
+      client.set(failedUpstreamKey(upstream, pathname), '1', {
+        ex: ttlSeconds,
+      }),
+    )
+  }
+}
+
 // 根据环境变量创建统一状态存储，确保 instances 与 fail:* 始终落到同一个后端。
 export function createStateStore(env: StateStoreEnv): StateStore {
   const backend = getStateStoreBackend(env.STATE_STORE_BACKEND)
   if (backend === 'redis') return new RedisStateStore(env.VALKEY_URL)
+  if (backend === 'redis-http') return new RedisHttpStateStore(env)
   return new KvStateStore(env.KV)
 }
