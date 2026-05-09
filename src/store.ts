@@ -8,18 +8,13 @@ const REDIS_SLOW_COMMAND_LOG_MS = 500
 const REDIS_HTTP_PARSE_ERROR_PREFIX = 'Unable to parse response body: '
 
 type StateStoreBackend = 'kv' | 'redis' | 'redis-http'
-type RedisClientCreateReason =
-  | 'missing_client'
-  | 'after_command_timeout'
-  | 'after_connect_failed'
-  | 'url_changed'
-  | 'client_not_ready'
+type RedisClientCreateReason = 'fresh_command'
 
 type RedisClientDestroyReason =
-  | 'command_timeout'
-  | 'url_changed'
-  | 'client_not_ready'
+  | 'command_finished'
   | 'connect_failed'
+  | 'command_failed'
+  | 'command_timeout'
 
 type StateStoreEnv = {
   KV: KVNamespace
@@ -55,6 +50,7 @@ type RedisClientDiagnostics = {
   generation: number
   createdAtMs: number
   readyAtMs?: number
+  prepareDurationMs?: number
   commandCount: number
   timedOutCommandCount: number
   commandInFlight: number
@@ -68,11 +64,7 @@ type RedisHttpConfig = {
   source: 'redis_http' | 'upstash_env'
 }
 
-let redisClient: RedisClient | undefined
-let redisClientUrl: string | undefined
-let redisConnectPromise: Promise<RedisClient> | undefined
 let redisClientGeneration = 0
-let redisLastDestroyReason: RedisClientDestroyReason | undefined
 let redisHttpClient: Redis | undefined
 let redisHttpClientUrl: string | undefined
 let redisHttpClientToken: string | undefined
@@ -287,6 +279,7 @@ function redisClientDiagnosticProps(
       diagnostics?.readyAtMs === undefined
         ? undefined
         : nowMs - diagnostics.readyAtMs,
+    prepareDurationMs: diagnostics?.prepareDurationMs,
     commandCount: diagnostics?.commandCount,
     timedOutCommandCount: diagnostics?.timedOutCommandCount,
     commandInFlight: diagnostics?.commandInFlight,
@@ -349,7 +342,7 @@ function createRedisClient(valkeyUrl: string): RedisClient {
   return client
 }
 
-// Redis 命令超时后销毁当前连接，避免后续请求继续复用已卡住的 client。
+// 销毁单次 Redis 操作使用的短连接，确保直连 Redis 不跨命令复用 client。
 function destroyRedisClient(
   client: RedisClient,
   reason: RedisClientDestroyReason,
@@ -374,13 +367,6 @@ function destroyRedisClient(
       ...errorProps(error),
     })
   }
-
-  if (redisClient === client) {
-    redisLastDestroyReason = reason
-    redisClient = undefined
-    redisClientUrl = undefined
-    redisConnectPromise = undefined
-  }
 }
 
 // 给单次 Redis 命令加短超时，把挂起命令转换为可降级的异常。
@@ -388,6 +374,7 @@ async function runRedisCommandWithTimeout<T>(
   client: RedisClient,
   operation: string,
   runCommand: () => Promise<T>,
+  prepareDurationMs: number,
 ): Promise<T> {
   const diagnostics = redisClientDiagnostics.get(client)
   const startedAtMs = Date.now()
@@ -404,6 +391,7 @@ async function runRedisCommandWithTimeout<T>(
     event: 'state_store.redis.command',
     outcome: 'started',
     operation,
+    prepareDurationMs,
     timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
     clientReadyAtStart,
     isFirstCommandOnClient,
@@ -421,11 +409,11 @@ async function runRedisCommandWithTimeout<T>(
         REDIS_COMMAND_TIMEOUT_MS,
       )
       const durationMs = Date.now() - startedAtMs
-      destroyRedisClient(client, 'command_timeout', operation)
       storeLogger.warn('redis command timed out; falling back', {
         event: 'state_store.redis.command',
         outcome: 'timed_out',
         operation,
+        prepareDurationMs,
         durationMs,
         timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
         clientReadyAtStart,
@@ -446,6 +434,7 @@ async function runRedisCommandWithTimeout<T>(
         outcome: 'succeeded',
         slow: true,
         operation,
+        prepareDurationMs,
         durationMs,
         timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
         clientReadyAtStart,
@@ -460,6 +449,7 @@ async function runRedisCommandWithTimeout<T>(
         event: 'state_store.redis.command',
         outcome: 'failed',
         operation,
+        prepareDurationMs,
         durationMs: Date.now() - startedAtMs,
         timeoutMs: REDIS_COMMAND_TIMEOUT_MS,
         clientReadyAtStart,
@@ -477,110 +467,86 @@ async function runRedisCommandWithTimeout<T>(
   }
 }
 
-// 复用同一个 Redis 连接；连接失败时清掉缓存，下一次请求再重新尝试连接。
-async function getRedisClient(
+// 为单条 Redis 操作创建短连接，按 connect -> command -> destroy 完成完整生命周期。
+async function runRedisCommandWithFreshClient<T>(
   valkeyUrl: string | undefined,
-): Promise<RedisClient> {
+  operation: string,
+  runCommand: (client: RedisClient) => Promise<T>,
+): Promise<T> {
   if (!valkeyUrl) {
     throw new Error('VALKEY_URL is required when STATE_STORE_BACKEND=redis')
   }
 
-  if (redisClient && redisClientUrl === valkeyUrl && redisClient.isReady) {
-    storeLogger.debug('redis ready client reused', {
-      event: 'state_store.redis.connect',
-      outcome: 'reused_ready',
-      reason: 'ready_client',
-      hasExistingClient: true,
-      hasConnectPromise: Boolean(redisConnectPromise),
-      ...redisClientDiagnosticProps(redisClient),
-    })
-    return redisClient
-  }
-
-  if (redisConnectPromise && redisClientUrl === valkeyUrl) {
-    storeLogger.info('redis connect already in progress', {
-      event: 'state_store.redis.connect',
-      outcome: 'joined_existing',
-      reason: 'connect_in_progress',
-      hasExistingClient: Boolean(redisClient),
-      hasConnectPromise: true,
-      ...(redisClient ? redisClientDiagnosticProps(redisClient) : {}),
-    })
-    return await redisConnectPromise
-  }
-
-  const hadExistingClient = Boolean(redisClient)
-  const hadConnectPromise = Boolean(redisConnectPromise)
-  let createReason: RedisClientCreateReason =
-    redisLastDestroyReason === 'command_timeout'
-      ? 'after_command_timeout'
-      : redisLastDestroyReason === 'connect_failed'
-        ? 'after_connect_failed'
-        : 'missing_client'
-  if (redisClient) {
-    createReason =
-      redisClientUrl === valkeyUrl ? 'client_not_ready' : 'url_changed'
-    destroyRedisClient(redisClient, createReason)
-  }
-
   const client = createRedisClient(valkeyUrl)
+  const createReason: RedisClientCreateReason = 'fresh_command'
   const diagnostics = registerRedisClientDiagnostics(client, createReason)
-  redisClient = client
-  redisClientUrl = valkeyUrl
-  redisLastDestroyReason = undefined
   const connectStartedAtMs = Date.now()
-  storeLogger.info('redis connect started', {
+  let destroyReason: RedisClientDestroyReason = 'command_finished'
+  let connected = false
+
+  storeLogger.debug('redis connect started', {
     event: 'state_store.redis.connect',
     outcome: 'started',
     reason: createReason,
-    hasExistingClient: hadExistingClient,
-    hasConnectPromise: hadConnectPromise,
+    operation,
     ...redisClientDiagnosticProps(client, diagnostics),
   })
 
-  let connectPromise: Promise<RedisClient> | undefined
-  connectPromise = (async () => {
+  try {
+    await client.connect()
+    connected = true
+    diagnostics.readyAtMs = Date.now()
+    const prepareDurationMs = diagnostics.readyAtMs - connectStartedAtMs
+    diagnostics.prepareDurationMs = prepareDurationMs
+    storeLogger.debug('redis connect succeeded', {
+      event: 'state_store.redis.connect',
+      outcome: 'succeeded',
+      reason: createReason,
+      operation,
+      durationMs: prepareDurationMs,
+      prepareDurationMs,
+      ...redisClientDiagnosticProps(client, diagnostics),
+    })
+    storeLogger.debug('redis client ready', {
+      event: 'state_store.redis.client',
+      outcome: 'ready',
+      reason: createReason,
+      operation,
+      prepareDurationMs,
+      ...redisClientDiagnosticProps(client, diagnostics),
+    })
+
     try {
-      await client.connect()
-      diagnostics.readyAtMs = Date.now()
-      storeLogger.info('redis connect succeeded', {
-        event: 'state_store.redis.connect',
-        outcome: 'succeeded',
-        reason: createReason,
-        durationMs: Date.now() - connectStartedAtMs,
-        hasExistingClient: redisClient === client,
-        hasConnectPromise: true,
-        ...redisClientDiagnosticProps(client, diagnostics),
-      })
-      storeLogger.info('redis client ready', {
-        event: 'state_store.redis.client',
-        outcome: 'ready',
-        reason: createReason,
-        ...redisClientDiagnosticProps(client, diagnostics),
-      })
-      return client
+      return await runRedisCommandWithTimeout(
+        client,
+        operation,
+        () => runCommand(client),
+        prepareDurationMs,
+      )
     } catch (error) {
+      destroyReason =
+        error instanceof RedisCommandTimeoutError
+          ? 'command_timeout'
+          : 'command_failed'
+      throw error
+    }
+  } catch (error) {
+    if (!connected) {
+      destroyReason = 'connect_failed'
       storeLogger.warn('redis connect failed', {
         event: 'state_store.redis.connect',
         outcome: 'failed',
         reason: createReason,
+        operation,
         durationMs: Date.now() - connectStartedAtMs,
-        hasExistingClient: redisClient === client,
-        hasConnectPromise: true,
         ...redisClientDiagnosticProps(client, diagnostics),
         ...errorProps(error),
       })
-      destroyRedisClient(client, 'connect_failed')
-      throw error
-    } finally {
-      if (connectPromise && redisConnectPromise === connectPromise) {
-        redisConnectPromise = undefined
-      }
     }
-  })()
-  redisConnectPromise = connectPromise
-
-  return await redisConnectPromise
+    throw error
+  } finally {
+    destroyRedisClient(client, destroyReason, operation)
+  }
 }
 
 class KvStateStore implements StateStore {
@@ -631,18 +597,20 @@ class RedisStateStore implements StateStore {
 
   // 从 Redis / Aiven Valkey 读取上游实例列表。
   async getInstances(): Promise<string[] | undefined> {
-    const client = await getRedisClient(this.valkeyUrl)
-    const raw = await runRedisCommandWithTimeout(client, 'get instances', () =>
-      client.get(INSTANCES_KEY),
+    const raw = await runRedisCommandWithFreshClient(
+      this.valkeyUrl,
+      'get instances',
+      (client) => client.get(INSTANCES_KEY),
     )
     return parseInstances(raw)
   }
 
   // 将上游实例列表整体写入 Redis / Aiven Valkey。
   async setInstances(upstreams: string[]): Promise<void> {
-    const client = await getRedisClient(this.valkeyUrl)
-    await runRedisCommandWithTimeout(client, 'set instances', () =>
-      client.set(INSTANCES_KEY, JSON.stringify(upstreams)),
+    await runRedisCommandWithFreshClient(
+      this.valkeyUrl,
+      'set instances',
+      (client) => client.set(INSTANCES_KEY, JSON.stringify(upstreams)),
     )
   }
 
@@ -653,14 +621,13 @@ class RedisStateStore implements StateStore {
   ): Promise<Set<string>> {
     if (upstreams.length === 0) return new Set()
 
-    const client = await getRedisClient(this.valkeyUrl)
     const keys = upstreams.map((upstream) =>
       failedUpstreamKey(upstream, pathname),
     )
-    const values = await runRedisCommandWithTimeout(
-      client,
+    const values = await runRedisCommandWithFreshClient(
+      this.valkeyUrl,
       'mget failed upstreams',
-      () => client.mGet(keys),
+      (client) => client.mGet(keys),
     )
     const failedUpstreams = new Set<string>()
 
@@ -676,14 +643,16 @@ class RedisStateStore implements StateStore {
     pathname: string,
     ttlSeconds: number,
   ): Promise<void> {
-    const client = await getRedisClient(this.valkeyUrl)
-    await runRedisCommandWithTimeout(client, 'set failed upstream marker', () =>
-      client.set(failedUpstreamKey(upstream, pathname), '1', {
-        expiration: {
-          type: 'EX',
-          value: ttlSeconds,
-        },
-      }),
+    await runRedisCommandWithFreshClient(
+      this.valkeyUrl,
+      'set failed upstream marker',
+      (client) =>
+        client.set(failedUpstreamKey(upstream, pathname), '1', {
+          expiration: {
+            type: 'EX',
+            value: ttlSeconds,
+          },
+        }),
     )
   }
 }
