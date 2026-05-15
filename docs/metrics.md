@@ -121,11 +121,11 @@ ORDER BY request_total DESC
 
 ## 最近 24 小时请求国家/地区分布
 
-普通入口代理请求会用 `route_request` 指标记录来源国家/地区，country 存在 `blob8`。这个 SQL 只查询 `route_request`，不会混入 `direct_upstream` 或合并收益指标；上线前旧数据没有有效 `blob8`，会和空值一起归入 `unknown`。
+普通入口代理请求会用 `route_request` 指标记录来源国家/地区，country 存在 `blob8`。这个 SQL 只查询 `route_request`，不会混入 `direct_upstream` 或合并收益指标；上线前旧数据没有有效 `blob8`，会和空字符串一起归入 `unknown`。
 
 ```sql
 SELECT
-  coalesce(nullIf(blob8, ''), 'unknown') AS country,
+  if(blob8 = '', 'unknown', blob8) AS country,
   sum(_sample_interval * double1) AS request_total
 FROM rsshub_balancer_metrics
 WHERE timestamp > NOW() - INTERVAL '1' DAY
