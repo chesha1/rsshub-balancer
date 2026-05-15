@@ -28,6 +28,17 @@ type RecordMetricOptions = {
   status?: number
   durationMs?: number
   upstream?: string
+  country?: string
+}
+
+// 从 Cloudflare request metadata 中提取国家/地区代码，缺失或异常时统一归为 unknown。
+export function getRequestCountry(request: Request): string {
+  const cf = request.cf as Record<string, unknown> | undefined
+  const country = cf?.country
+  if (typeof country !== 'string') return 'unknown'
+
+  const normalizedCountry = country.trim()
+  return normalizedCountry.length > 0 ? normalizedCountry : 'unknown'
 }
 
 // 将合并收益事件写入 Analytics Engine；写入失败只记录日志，不能影响主请求。
@@ -41,6 +52,7 @@ export function recordMetric(
   const status = options.status === undefined ? 'none' : String(options.status)
   const durationMs = options.durationMs ?? 0
   const upstream = options.upstream ?? 'none'
+  const country = options.country ?? 'none'
 
   try {
     metrics.writeDataPoint({
@@ -53,6 +65,7 @@ export function recordMetric(
         reason,
         status,
         upstream,
+        country,
       ],
       doubles: [1, durationMs],
     })
@@ -67,6 +80,7 @@ export function recordMetric(
       reason,
       status,
       upstream,
+      country,
       ...errorProps(e),
     })
   }
