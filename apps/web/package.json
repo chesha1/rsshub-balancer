@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "vue": "^3.5.25"
+    "vue": "^3.5.25",
+    "vue-i18n": "^11.4.2"
   }
 }

@@ -1,0 +1,106 @@
+{
+  "language": {
+    "switchAria": "切换到英文"
+  },
+  "hero": {
+    "title": "RSSHub Balancer",
+    "summary": "为多个 RSSHub 实例做负载均衡，复用缓存响应，减少重复抓取。"
+  },
+  "upstreams": {
+    "title": "当前上游实例",
+    "introBefore": "以下实例自动从",
+    "docsLink": "RSSHub 官方文档",
+    "introAfter": "同步，另包含一个自维护的兜底实例。",
+    "loading": "正在加载当前实例列表…",
+    "error": "当前实例列表暂时不可用。"
+  },
+  "howItWorks": {
+    "title": "工作原理",
+    "introBefore": "本负载均衡器",
+    "introStrong": "不会",
+    "introAfter": "对上游 RSSHub 实例或被爬取的原始网站造成额外负担：",
+    "coalescing": {
+      "title": "两级请求合并",
+      "summary": "—— 同一时刻对同一路由的多个并发请求会先在 Worker isolate 内共享同一个 Promise，尽量合并为一次上游请求。",
+      "cost": "Durable Objects 原本用于跨 isolate 合并，但目前成本过高，已经触发过两次 12.50 美元扣费；分析后发现额外收益很小。",
+      "current": "所以暂时只有约 1% 符合条件的请求会尝试进入 Durable Object，其余请求会直接走 isolate 合并与上游转发。"
+    },
+    "cacheAware": {
+      "title": "缓存感知路由",
+      "body": "—— 在向上游发起实际请求前，先并行检查各实例是否已缓存该路由。优先将请求转发给已有缓存的实例，由其直接返回缓存内容，无需重新抓取原始网站。"
+    },
+    "noImpact": {
+      "title": "不影响原始网站",
+      "body": "—— 每个 RSSHub 实例都有自己的缓存和抓取调度。本均衡器只在 RSSHub 实例层面做分发，从不直接抓取原始网站，也不会改变任何实例的抓取频率。"
+    }
+  },
+  "compatibility": {
+    "title": "接口兼容性",
+    "summary": "与 RSSHub 原始接口的差异如下：",
+    "headers": {
+      "path": "路径",
+      "status": "状态",
+      "notes": "说明"
+    },
+    "rows": {
+      "feed": {
+        "status": "✅ 负载均衡",
+        "notes": "核心 Feed 路由，经两级请求合并后转发上游"
+      },
+      "home": {
+        "status": "✅ 自定义",
+        "notes": "本页面，替代 RSSHub 原始首页"
+      },
+      "healthz": {
+        "status": "✅ 自定义",
+        "notes": "聚合检查所有上游实例健康状态"
+      },
+      "robots": {
+        "status": "✅ 自定义",
+        "notes": "禁止所有搜索引擎索引"
+      },
+      "routeStatus": {
+        "status": "✅ 聚合代理",
+        "notes": "查询任一上游是否已缓存指定路由"
+      },
+      "metrics": {
+        "status": "🚫 未开放",
+        "notes": "合并收益指标写入 Workers Analytics Engine，通过 SQL API 查询"
+      },
+      "openapi": {
+        "status": "❌ 不可用",
+        "notes": "API 文档请直接访问上游实例"
+      },
+      "reference": {
+        "status": "❌ 不可用",
+        "notes": "交互式 API 文档 UI"
+      },
+      "namespace": {
+        "status": "❌ 不可用",
+        "notes": "命名空间元数据查询"
+      },
+      "category": {
+        "status": "❌ 不可用",
+        "notes": "分类查询"
+      },
+      "radar": {
+        "status": "❌ 不可用",
+        "notes": "Radar 规则查询"
+      },
+      "follow": {
+        "status": "❌ 不可用",
+        "notes": "Follow 实例配置"
+      },
+      "apiRoute": {
+        "status": "❌ 不可用",
+        "notes": "业务 JSON API（apiRoute）"
+      }
+    }
+  },
+  "contribute": {
+    "title": "想要添加或移除你维护的实例？",
+    "beforeLink": "请在",
+    "link": "GitHub 仓库",
+    "afterLink": "提交 Issue。"
+  }
+}

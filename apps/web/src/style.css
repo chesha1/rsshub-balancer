@@ -35,6 +35,33 @@ a:hover {
   padding: 0 1rem;
 }
 
+.page-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.language-toggle {
+  min-width: 5rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+  color: #24292f;
+  font: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.language-toggle:hover {
+  background: #f6f8fa;
+}
+
+.language-toggle:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: 2px;
+}
+
 .language-section {
   min-width: 0;
 }

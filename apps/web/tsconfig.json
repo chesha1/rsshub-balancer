@@ -4,7 +4,7 @@
     "composite": true,
     "noEmit": true,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "node"],
+    "types": ["vite/client", "node", "@intlify/unplugin-vue-i18n/messages"],
     "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/web.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]

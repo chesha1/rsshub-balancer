@@ -1,0 +1,106 @@
+{
+  "language": {
+    "switchAria": "Switch to Chinese"
+  },
+  "hero": {
+    "title": "RSSHub Balancer",
+    "summary": "Load balancer for multiple RSSHub instances — reuses cached responses and reduces redundant fetching."
+  },
+  "upstreams": {
+    "title": "Current Upstreams",
+    "introBefore": "Instances below are automatically synced from the ",
+    "docsLink": "official RSSHub documentation",
+    "introAfter": ", plus one self-maintained standby instance.",
+    "loading": "Loading current upstreams…",
+    "error": "The current upstream list is temporarily unavailable."
+  },
+  "howItWorks": {
+    "title": "How It Works",
+    "introBefore": "This load balancer does ",
+    "introStrong": "not",
+    "introAfter": " impose extra burden on upstream RSSHub instances or the original websites being crawled:",
+    "coalescing": {
+      "title": "Two-level request coalescing",
+      "summary": "— Concurrent requests for the same route first share the same Promise within a Worker isolate, so most duplicate traffic is merged there.",
+      "cost": "Durable Objects were originally used for cross-isolate coalescing, but the current cost is too high: they have triggered two $12.50 charges. After analysis, the extra benefit is small.",
+      "current": "Only about 1% of eligible requests currently attempt to enter the Durable Object; the rest use isolate-level coalescing and direct upstream forwarding."
+    },
+    "cacheAware": {
+      "title": "Cache-aware routing",
+      "body": "— Before making an actual request, the balancer checks all upstream instances in parallel to find one that has already cached the route. The request is then forwarded to the cached instance, which serves its cached content without re-crawling the source website."
+    },
+    "noImpact": {
+      "title": "No impact on original websites",
+      "body": "— Each RSSHub instance maintains its own cache and crawl schedule. This balancer only distributes requests at the RSSHub instance level; it never crawls original websites directly, nor does it alter any instance's crawl frequency."
+    }
+  },
+  "compatibility": {
+    "title": "Endpoint Compatibility",
+    "summary": "Differences from the original RSSHub endpoints:",
+    "headers": {
+      "path": "Path",
+      "status": "Status",
+      "notes": "Notes"
+    },
+    "rows": {
+      "feed": {
+        "status": "✅ Load balanced",
+        "notes": "Core feed routes, forwarded via two-level request coalescing"
+      },
+      "home": {
+        "status": "✅ Custom",
+        "notes": "This page, replaces the original RSSHub homepage"
+      },
+      "healthz": {
+        "status": "✅ Custom",
+        "notes": "Aggregated health check across all upstreams"
+      },
+      "robots": {
+        "status": "✅ Custom",
+        "notes": "Disallows all search engine indexing"
+      },
+      "routeStatus": {
+        "status": "✅ Aggregated proxy",
+        "notes": "Checks if any upstream has cached the given route"
+      },
+      "metrics": {
+        "status": "🚫 Not public",
+        "notes": "Coalescing benefit metrics are written to Workers Analytics Engine and queried through the SQL API"
+      },
+      "openapi": {
+        "status": "❌ Unavailable",
+        "notes": "API docs — visit an upstream instance directly"
+      },
+      "reference": {
+        "status": "❌ Unavailable",
+        "notes": "Interactive API docs UI"
+      },
+      "namespace": {
+        "status": "❌ Unavailable",
+        "notes": "Namespace metadata queries"
+      },
+      "category": {
+        "status": "❌ Unavailable",
+        "notes": "Category queries"
+      },
+      "radar": {
+        "status": "❌ Unavailable",
+        "notes": "Radar rule queries"
+      },
+      "follow": {
+        "status": "❌ Unavailable",
+        "notes": "Follow instance configuration"
+      },
+      "apiRoute": {
+        "status": "❌ Unavailable",
+        "notes": "Business JSON API (apiRoute)"
+      }
+    }
+  },
+  "contribute": {
+    "title": "Want to add or remove your instance?",
+    "beforeLink": "Please open an issue on the ",
+    "link": "GitHub repository",
+    "afterLink": "."
+  }
+}

@@ -1,13 +1,22 @@
 import { fileURLToPath } from 'node:url'
+import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
 const appRoot = fileURLToPath(new URL('.', import.meta.url))
 const outputDir = fileURLToPath(new URL('../../dist/apps/web', import.meta.url))
+const localeResources = fileURLToPath(
+  new URL('./src/locales/**', import.meta.url),
+)
 
 export default defineConfig({
   root: appRoot,
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    VueI18nPlugin({
+      include: [localeResources],
+    }),
+  ],
   server: {
     host: '0.0.0.0',
     proxy: {
