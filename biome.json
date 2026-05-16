@@ -9,7 +9,8 @@
     "ignoreUnknown": false,
     "includes": [
       "**",
-      "!worker-configuration.d.ts",
+      "!apps/server/worker-configuration.d.ts",
+      "!**/*.vue",
       "!docs/http.request.json",
       "!docs/logs-2026-05-08T06_25_57.894Z.json",
       "!docs/timed_out.json"

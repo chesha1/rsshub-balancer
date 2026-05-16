@@ -10,8 +10,10 @@ RSSHub Balancer —— 为多个 RSSHub 实例做负载均衡，复用缓存响�
 
 - **运行时**: Cloudflare Workers
 - **Web 框架**: Hono
+- **首页**: Vue3 / Vite
 - **语言**: TypeScript（ESNext，Bundler 模块解析）
 - **包管理器**: pnpm
+- **任务编排**: Nx（仅本地编排和缓存，不使用 Nx Cloud）
 - **部署工具**: Wrangler
 - **Lint / 格式化**: Biome（单引号，按需分号，2 空格缩进，注释统一用 `//` 不用 `/* */`）
 
@@ -25,30 +27,32 @@ RSSHub Balancer —— 为多个 RSSHub 实例做负载均衡，复用缓存响�
 - `pnpm run dev` — 启动本地开发服务器（wrangler dev）
 - `pnpm run deploy` — 部署到 Cloudflare Workers
 - `pnpm run cf-typegen` — 根据 Worker 配置生成 CloudflareBindings 类型
-- `pnpm run lint` — 代码检查（biome check）
+- `pnpm run typecheck` — Nx 编排的 TypeScript 类型检查
+- `pnpm run lint` — Nx 编排的代码检查（server/web）
+- `pnpm run build` — Nx 编排的 web build + server dry-run build
 - `pnpm run lint:fix` — 代码检查并自动修复
-- `pnpm exec tsc --noEmit` — TypeScript 类型检查（修改代码后需同时通过 lint 和 tsc）
 
 ## 架构
 
-- `src/index.ts` — 主入口，导出 Hono app 及 `RequestCoalescer` DO class。定义所有路由（见下方路由策略）；`scheduled` 处理器每小时（`0 * * * *`）从 GitHub 同步上游实例列表，健康检查后写入 KV `instances` 键
-- `src/coalescer.ts` — `RequestCoalescer` Durable Object，跨 isolate 的请求合并层
-- `src/metrics.ts` — Workers Analytics Engine 指标写入封装，记录请求合并角色、直达上游与 follower 受益计数
-- `src/upstream.ts` — 上游选择与请求转发逻辑（缓存检查、健康分组、顺序回退）
-- `src/home.ts` — 首页 HTML 模板（中英双语），展示上游实例列表、工作原理、接口兼容性
-- `src/types.ts` — 共享类型定义（`ResponseSnapshot`）
-- `src/config.ts` — 上游 RSSHub 实例列表及 `failTtl` 等参数
-- `src/utils.ts` — 共享工具函数（`trimSlash`、`shuffle`、`fromResponse`、`toResponse`）
-- `wrangler.jsonc` — Cloudflare Worker 配置，KV 绑定名为 `KV`，Durable Object 绑定名为 `DO`，Workers Analytics Engine 绑定名为 `METRICS`（通过 `env.KV`、`env.DO`、`env.METRICS` 访问）。KV 中存储两类数据：`instances`（JSON 数组，健康的上游 URL 列表）和 `fail:<upstream>|<pathname>`（单条上游对特定路由的失败标记，TTL 由 `config.failTtl` 控制）
+- `apps/server/src/index.ts` — Worker 主入口，导出 Hono app 及 `RequestCoalescer` DO class。定义所有路由（见下方路由策略）；`scheduled` 处理器每小时（`0 * * * *`）从 GitHub 同步上游实例列表，健康检查后写入状态存储的 `instances` 键
+- `apps/server/src/coalescer.ts` — `RequestCoalescer` Durable Object，跨 isolate 的请求合并层
+- `apps/server/src/metrics.ts` — Workers Analytics Engine 指标写入封装，记录请求合并角色、直达上游与 follower 受益计数
+- `apps/server/src/upstream.ts` — 上游选择与请求转发逻辑（缓存检查、健康分组、顺序回退）
+- `apps/server/src/types.ts` — 共享类型定义（`ResponseSnapshot`）
+- `apps/server/src/config.ts` — 上游 RSSHub 实例列表及 `failTtl` 等参数
+- `apps/server/src/utils.ts` — 共享工具函数（`trimSlash`、`shuffle`、`fromResponse`、`toResponse`）
+- `apps/server/wrangler.jsonc` — Cloudflare Worker 配置，KV 绑定名为 `KV`，Durable Object 绑定名为 `DO`，Workers Analytics Engine 绑定名为 `METRICS`，Static Assets 绑定名为 `ASSETS`（通过 `env.KV`、`env.DO`、`env.METRICS`、`env.ASSETS` 访问）。状态存储中保存两类数据：`instances`（JSON 数组，健康的上游 URL 列表）和 `fail:<upstream>|<pathname>`（单条上游对特定路由的失败标记，TTL 由 `config.failTtl` 控制）
+- `apps/web` — Vue3 / Vite 首页，前端只请求公开 UI 数据接口 `GET /_internal/upstreams`
 
 ### 路由策略
 
 本 LB 仅代理 RSSHub 的 Feed 路由，其余端点按以下策略处理：
 
 - **负载均衡**：`/:namespace/:path` — 核心 Feed 路由，经两级请求合并后转发上游
-- **自定义实现**：`/`、`/healthz`、`/robots.txt` — 本地处理，不转发上游
+- **静态首页**：`/`、`/_assets/*` — 由 Cloudflare Static Assets 托管；缺失的 `/_assets/*` 不转发上游
+- **自定义实现**：`/_internal/upstreams`、`/healthz`、`/robots.txt` — 本地处理，不转发上游
 - **聚合代理**：`/api/route/status` — 并行查询所有上游，任一已缓存即返回
-- **封锁（404）**：`/api/*`（除 `/api/route/status`）、`/metrics`、`/.well-known/*`、`/cdn-cgi/*`、静态资源 — RSSHub 的 `/api/*` 在 Workers 环境不可用，本 LB 不代理这些端点；合并收益指标写入 Analytics Engine 后通过 SQL API 查询
+- **封锁（404）**：`/_internal/*`（除 `/_internal/upstreams`）、`/_assets/*`（缺失后落入 Worker 时）、`/api/*`（除 `/api/route/status`）、`/metrics`、`/.well-known/*`、`/cdn-cgi/*`、静态资源 — RSSHub 的 `/api/*` 在 Workers 环境不可用，本 LB 不代理这些端点；合并收益指标写入 Analytics Engine 后通过 SQL API 查询
 
 > 项目当前没有测试框架，也没有测试用例。
 
@@ -56,21 +60,21 @@ RSSHub Balancer —— 为多个 RSSHub 实例做负载均衡，复用缓存响�
 
 幂等请求（GET/HEAD）经过两级请求合并（request coalescing），非幂等请求直接走上游解析：
 
-1. **isolate 级合并**（`src/index.ts`）：同一 isolate 内对同一 requestPath 的并发请求共享同一个 promise
-2. **Durable Object 级合并**（`src/coalescer.ts`）：跨 isolate 的同路径并发请求在 DO 内合并
-3. **上游解析**（`src/upstream.ts`）：
+1. **isolate 级合并**（`apps/server/src/index.ts`）：同一 isolate 内对同一 requestPath 的并发请求共享同一个 promise
+2. **Durable Object 级合并**（`apps/server/src/coalescer.ts`）：跨 isolate 的同路径并发请求在 DO 内合并
+3. **上游解析**（`apps/server/src/upstream.ts`）：
    - 并行读取 KV 中所有上游对当前路由的失败记录，将上游分为 healthy / unhealthy 两组，各组内随机洗牌后拼接为优先级队列
    - 并行请求所有上游的 `/api/route/status` 接口，检查是否已缓存当前路由
    - 如果找到已缓存的实例，将其提到队首优先尝试
    - 按队列依次请求直到某个实例返回成功（2xx/3xx）；失败的实例异步写入 KV 失败记录（TTL 由 `config.failTtl` 控制）
    - 所有实例均失败时返回 502
 
-`ResponseSnapshot`（`src/types.ts`）将 Response 的 body 缓冲为 `Uint8Array`，使单次 fetch 结果可被多个 follower 复用。
+`ResponseSnapshot`（`apps/server/src/types.ts`）将 Response 的 body 缓冲为 `Uint8Array`，使单次 fetch 结果可被多个 follower 复用。
 
 ### 注意事项
 
 - 使用 Cloudflare 绑定时，需传入泛型：`new Hono<{ Bindings: CloudflareBindings }>()`
-- `worker-configuration.d.ts` 由 `cf-typegen` 自动生成，已从 Biome 检查中排除
+- `apps/server/worker-configuration.d.ts` 由 `cf-typegen` 自动生成，已从 Biome 检查中排除
 
 ## Git Commit 规范
 

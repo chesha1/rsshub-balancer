@@ -1,0 +1,49 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "@rsshub-balancer/server",
+  "projectType": "application",
+  "sourceRoot": "apps/server/src",
+  "implicitDependencies": ["@rsshub-balancer/web"],
+  "targets": {
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "wrangler dev --config apps/server/wrangler.jsonc --remote"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "outputs": ["{workspaceRoot}/dist/apps/server"],
+      "options": {
+        "command": "wrangler deploy --config apps/server/wrangler.jsonc --dry-run --outdir dist/apps/server"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/server/tsconfig.json --noEmit"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "biome check apps/server --files-ignore-unknown=true"
+      }
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "options": {
+        "command": "wrangler deploy --config apps/server/wrangler.jsonc --minify"
+      }
+    },
+    "cf-typegen": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/worker-configuration.d.ts"],
+      "options": {
+        "command": "wrangler types --config apps/server/wrangler.jsonc --env-interface CloudflareBindings apps/server/worker-configuration.d.ts"
+      }
+    }
+  }
+}

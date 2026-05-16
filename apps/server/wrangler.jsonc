@@ -1,10 +1,16 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
+  "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "rsshub-balancer",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-06",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
+  "assets": {
+    "directory": "../../dist/apps/web",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/_internal/*", "/api/*", "/healthz", "/robots.txt"]
+  },
   "vars": {
     // 可选值：redis 直连外部 Redis / Aiven Valkey；redis-http 通过 HTTP proxy；kv 回滚到 Cloudflare KV。
     "STATE_STORE_BACKEND": "redis"

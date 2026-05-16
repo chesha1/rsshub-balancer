@@ -1,25 +1,25 @@
 {
   "name": "rsshub-balancer",
+  "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy --minify",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
-    "lint": "biome check .",
-    "lint:fix": "biome check --fix ."
-  },
-  "dependencies": {
-    "@logtape/hono": "^2.0.5",
-    "@logtape/logtape": "^2.0.5",
-    "@redis/client": "^5.12.1",
-    "@upstash/redis": "^1.38.0",
-    "hono": "^4.12.14",
-    "uuid": "^13.0.0"
+    "dev:server": "wrangler dev --config apps/server/wrangler.jsonc --remote",
+    "dev:web": "vite dev --config apps/web/vite.config.ts",
+    "build": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run-many -t build",
+    "typecheck": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run-many -t typecheck",
+    "lint": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run-many -t lint",
+    "lint:fix": "biome check --fix . --files-ignore-unknown=true",
+    "deploy": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run @rsshub-balancer/server:deploy",
+    "cf-typegen": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run @rsshub-balancer/server:cf-typegen"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.12",
+    "@vitejs/plugin-vue": "^6.0.3",
     "@types/node": "^25.6.0",
+    "nx": "^22.1.3",
     "typescript": "^6.0.3",
+    "vite": "^7.2.7",
+    "vue-tsc": "^3.1.7",
     "wrangler": "^4.83.0"
   }
 }

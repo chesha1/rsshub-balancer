@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "defaultBase": "main",
+  "useDaemonProcess": false,
+  "namedInputs": {
+    "default": [
+      "{projectRoot}/**/*",
+      "sharedGlobals"
+    ],
+    "production": [
+      "default"
+    ],
+    "sharedGlobals": [
+      "{workspaceRoot}/package.json",
+      "{workspaceRoot}/pnpm-lock.yaml",
+      "{workspaceRoot}/tsconfig.base.json",
+      "{workspaceRoot}/biome.json"
+    ]
+  },
+  "targetDefaults": {
+    "build": {
+      "cache": true,
+      "inputs": [
+        "production"
+      ]
+    },
+    "typecheck": {
+      "cache": true,
+      "inputs": [
+        "production"
+      ]
+    },
+    "lint": {
+      "cache": true,
+      "inputs": [
+        "production"
+      ]
+    }
+  },
+  "analytics": false
+}

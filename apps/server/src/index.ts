@@ -1,9 +1,9 @@
 import { honoLogger } from '@logtape/hono'
+import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { requestId } from 'hono/request-id'
 import { v7 as uuidv7 } from 'uuid'
 import { config } from './config'
-import { renderHome } from './home'
 import {
   cronLogger,
   errorProps,
@@ -26,6 +26,12 @@ import { fromResponse, toResponse, trimSlash } from './utils'
 
 export { RequestCoalescer } from './coalescer'
 
+type AppEnv = {
+  Bindings: CloudflareBindings
+}
+
+type AppContext = Context<AppEnv>
+
 // isolate 级请求合并：key 为 method + requestPath，value 为正在进行的上游解析 promise。
 // 同一 isolate 内对同一路径同方法的并发 GET/HEAD 请求共享同一个 promise，leader 完成后条目自动清除。
 const inflight = new Map<string, Promise<ResponseSnapshot>>()
@@ -42,10 +48,17 @@ const quietAccessLogExactPaths = new Set([
 ])
 
 // 这类前缀通常属于平台探针或当前未开放的接口，同样默认静默访问日志。
-const quietAccessLogPrefixes = ['/api/', '/.well-known/', '/cdn-cgi/']
+const quietAccessLogPrefixes = [
+  '/_assets/',
+  '/api/',
+  '/.well-known/',
+  '/cdn-cgi/',
+]
 
 // 统一注册一批明确不对外提供的路由，避免下面散落多条重复的 notFound 声明。
 const notFoundRoutes = [
+  '/_assets/*',
+  '/_internal/*',
   '/metrics',
   '/api/*',
   '/.well-known/*',
@@ -62,9 +75,35 @@ function shouldSkipAccessLog(path: string) {
   )
 }
 
-const app = new Hono<{
-  Bindings: CloudflareBindings
-}>()
+// 从公开 UI 数据命名空间返回当前上游列表，响应中不暴露状态存储错误细节。
+async function handleInternalUpstreams(c: AppContext) {
+  if (c.req.method !== 'GET') {
+    return c.text('Method Not Allowed', 405, {
+      Allow: 'GET',
+    })
+  }
+
+  const url = new URL(c.req.url)
+  if (url.search !== '') {
+    return c.json({ error: 'bad_request' }, 400)
+  }
+
+  try {
+    const upstreams = await getUpstreams(createStateStore(c.env), {
+      waitUntil: (p) => c.executionCtx.waitUntil(p),
+    })
+    return c.json({ upstreams })
+  } catch (e) {
+    httpLogger.warn('public upstream list request failed', {
+      event: 'internal.upstreams',
+      outcome: 'failed',
+      ...errorProps(e),
+    })
+    return c.json({ error: 'internal_error' }, 500)
+  }
+}
+
+const app = new Hono<AppEnv>()
 
 // 为每个外部请求生成/复用一个 X-Request-Id，作为整条链路的业务关联键。
 app.use(
@@ -105,12 +144,7 @@ app.use(
   }),
 )
 
-app.all('/', async (c) => {
-  const upstreams = await getUpstreams(createStateStore(c.env), {
-    waitUntil: (p) => c.executionCtx.waitUntil(p),
-  })
-  return c.html(renderHome(upstreams))
-})
+app.all('/_internal/upstreams', handleInternalUpstreams)
 app.get('/healthz', async (c) => {
   const upstreams = await getUpstreams(createStateStore(c.env), {
     waitUntil: (p) => c.executionCtx.waitUntil(p),
