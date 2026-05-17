@@ -16,26 +16,27 @@
 | `blob6` | `status` | 响应状态码字符串，例如 `200` / `404` / `503` | 最终返回或被复用响应的 HTTP 状态码 |
 | `blob7` | `upstream` | 实际 upstream URL / `none` | `direct_upstream` 会记录 leader 最终触达的 upstream；其它指标默认 `none` |
 | `blob8` | `country` | 国家/地区代码 / `unknown` / `none` | `route_request` 记录 Cloudflare `request.cf.country`；无法判断时为 `unknown`；非 `route_request` 指标为 `none` |
+| `blob9` | `edge_colo` | Cloudflare 机房代码 / `unknown` / `none` | `route_request` 记录 Cloudflare `request.cf.colo`；无法判断时为 `unknown`；非 `route_request` 指标为 `none` |
 | `double1` | `count` | `1` | 事件计数，查询时用 `sum(_sample_interval * double1)` 统计近似次数 |
 | `double2` | `duration_ms` | 毫秒数 | 请求、合并或上游转发耗时 |
 
-`route_request` 的 `blob8` 直接来自 Cloudflare metadata 的 `request.cf.country`，只记录国家/地区代码，不记录更细的 region。值通常是 ISO 3166-1 alpha-2，例如 `US`、`JP`；Tor 可能为 `T1`；缺失或无法判断时为 `unknown`。其它指标继续保持合并/上游口径，`blob8` 固定为 `none`，避免误读为每个入口请求的地理分布。
+`route_request` 的 `blob8` 直接来自 Cloudflare metadata 的 `request.cf.country`，只记录国家/地区代码，不记录更细的 region。值通常是 ISO 3166-1 alpha-2，例如 `US`、`JP`；Tor 可能为 `T1`；缺失或无法判断时为 `unknown`。`blob9` 直接来自 `request.cf.colo`，记录用户请求进入本 Worker 时命中的 Cloudflare 入口机房，例如 `SJC`、`NRT`、`LAX`；缺失或无法判断时为 `unknown`。其它指标继续保持合并/上游口径，`blob8` 和 `blob9` 固定为 `none`，避免误读为每个入口请求的地理分布。
 
 按指标拆开看，目前会出现这些 label 组合：
 
-| `metric` | `layer` | `role` | `reason` | `upstream` | `country` | 记录时机 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `route_request` | `edge` | `none` | `none` | `none` | Cloudflare country / `unknown` | 通用转发入口收到并完成一次请求 |
-| `coalesce_role` | `isolate` | `leader` | `none` | `none` | `none` | GET/HEAD 在当前 isolate 内成为 leader |
-| `coalesce_role` | `isolate` | `follower` | `isolate_follower` | `none` | `none` | GET/HEAD 在当前 isolate 内复用已有请求 |
-| `coalesce_role` | `do` | `leader` | `none` | `none` | `none` | 请求进入 Durable Object 后成为 leader |
-| `coalesce_role` | `do` | `follower` | `do_follower` | `none` | `none` | 请求进入 Durable Object 后复用已有请求 |
-| `direct_upstream` | `edge` | `none` | `non_get` | 实际 upstream URL | `none` | 非 GET/HEAD 请求直接转发上游 |
-| `direct_upstream` | `isolate` | `leader` | `do_rpc_failed` | 实际 upstream URL | `none` | Durable Object RPC 失败后在 isolate 降级直连上游 |
-| `direct_upstream` | `isolate` | `leader` | `do_sampled_out` | 实际 upstream URL | `none` | Durable Object 随机抽样未命中后在 isolate 直连上游 |
-| `direct_upstream` | `do` | `leader` | `do_leader` | 实际 upstream URL | `none` | Durable Object leader 真实请求上游 |
-| `benefited` | `isolate` | `follower` | `isolate_follower` | `none` | `none` | isolate follower 复用结果，节省一次上游请求 |
-| `benefited` | `do` | `follower` | `do_follower` | `none` | `none` | Durable Object follower 复用结果，节省一次上游请求 |
+| `metric` | `layer` | `role` | `reason` | `upstream` | `country` | `edge_colo` | 记录时机 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `route_request` | `edge` | `none` | `none` | `none` | Cloudflare country / `unknown` | Cloudflare colo / `unknown` | 通用转发入口收到并完成一次请求 |
+| `coalesce_role` | `isolate` | `leader` | `none` | `none` | `none` | `none` | GET/HEAD 在当前 isolate 内成为 leader |
+| `coalesce_role` | `isolate` | `follower` | `isolate_follower` | `none` | `none` | `none` | GET/HEAD 在当前 isolate 内复用已有请求 |
+| `coalesce_role` | `do` | `leader` | `none` | `none` | `none` | `none` | 请求进入 Durable Object 后成为 leader |
+| `coalesce_role` | `do` | `follower` | `do_follower` | `none` | `none` | `none` | 请求进入 Durable Object 后复用已有请求 |
+| `direct_upstream` | `edge` | `none` | `non_get` | 实际 upstream URL | `none` | `none` | 非 GET/HEAD 请求直接转发上游 |
+| `direct_upstream` | `isolate` | `leader` | `do_rpc_failed` | 实际 upstream URL | `none` | `none` | Durable Object RPC 失败后在 isolate 降级直连上游 |
+| `direct_upstream` | `isolate` | `leader` | `do_sampled_out` | 实际 upstream URL | `none` | `none` | Durable Object 随机抽样未命中后在 isolate 直连上游 |
+| `direct_upstream` | `do` | `leader` | `do_leader` | 实际 upstream URL | `none` | `none` | Durable Object leader 真实请求上游 |
+| `benefited` | `isolate` | `follower` | `isolate_follower` | `none` | `none` | `none` | isolate follower 复用结果，节省一次上游请求 |
+| `benefited` | `do` | `follower` | `do_follower` | `none` | `none` | `none` | Durable Object follower 复用结果，节省一次上游请求 |
 
 ## 最近 24 小时合并收益
 
@@ -131,6 +132,22 @@ FROM rsshub_balancer_metrics
 WHERE timestamp > NOW() - INTERVAL '1' DAY
   AND blob1 = 'route_request'
 GROUP BY country
+ORDER BY request_total DESC
+```
+
+## 最近 24 小时请求来源到入口机房分布
+
+普通入口代理请求会用 `route_request` 指标同时记录来源国家/地区和入口 Cloudflare 机房，country 存在 `blob8`，edge colo 存在 `blob9`。这个 SQL 适合直接作为 `country -> edge_colo` 桑基图的数据源；上线前旧数据没有有效 `blob9`，会和空字符串一起归入 `unknown`。
+
+```sql
+SELECT
+  if(blob8 = '', 'unknown', blob8) AS country,
+  if(blob9 = '', 'unknown', blob9) AS edge_colo,
+  sum(_sample_interval * double1) AS request_total
+FROM rsshub_balancer_metrics
+WHERE timestamp > NOW() - INTERVAL '1' DAY
+  AND blob1 = 'route_request'
+GROUP BY country, edge_colo
 ORDER BY request_total DESC
 ```
 

@@ -13,7 +13,7 @@ import {
   withRequestLogContext,
   withResponseRequestId,
 } from './log'
-import { getRequestCountry, recordMetric } from './metrics'
+import { getRequestColo, getRequestCountry, recordMetric } from './metrics'
 import { createStateStore } from './store'
 import type { ResponseSnapshot } from './types'
 import {
@@ -206,6 +206,7 @@ app.all('/*', async (c) => {
   const coalesceKey = `${method} ${requestPath}`
   const request = c.req.raw
   const requestCountry = getRequestCountry(request)
+  const requestColo = getRequestColo(request)
   const startedAt = Date.now()
   const stateStore = createStateStore(c.env)
 
@@ -226,6 +227,7 @@ app.all('/*', async (c) => {
       status: res.status,
       durationMs,
       country: requestCountry,
+      edgeColo: requestColo,
     })
     recordMetric(c.env.METRICS, {
       metric: 'direct_upstream',
@@ -316,6 +318,7 @@ app.all('/*', async (c) => {
     status: snapshot.status,
     durationMs,
     country: requestCountry,
+    edgeColo: requestColo,
   })
   recordMetric(c.env.METRICS, {
     metric: 'coalesce_role',
