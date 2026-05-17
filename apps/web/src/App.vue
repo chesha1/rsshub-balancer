@@ -2,6 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { setAppLocale } from './i18n'
+import TrafficSankeyChart from './TrafficSankeyChart.vue'
+import {
+  trafficSankeyResponseSchema,
+  type TrafficSankeyLink,
+  upstreamsResponseSchema,
+} from './types'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
@@ -80,7 +86,9 @@ const compatibilityRows: CompatibilityRow[] = [
 ]
 
 const upstreams = ref<string[]>([])
-const loadState = ref<LoadState>('loading')
+const upstreamsLoadState = ref<LoadState>('loading')
+const trafficSankeyLinks = ref<TrafficSankeyLink[]>([])
+const trafficSankeyLoadState = ref<LoadState>('loading')
 const { t, locale } = useI18n()
 
 const languageButtonLabel = computed(() =>
@@ -95,7 +103,7 @@ function switchLocale() {
 
 // 从公开 UI 数据接口加载实例列表；失败时只影响首页展示，不改变路由行为。
 async function loadUpstreams() {
-  loadState.value = 'loading'
+  upstreamsLoadState.value = 'loading'
 
   try {
     const response = await fetch('/_internal/upstreams', {
@@ -107,22 +115,41 @@ async function loadUpstreams() {
       throw new Error(`upstreams request failed: ${response.status}`)
     }
 
-    const payload = (await response.json()) as { upstreams?: unknown }
-    if (!Array.isArray(payload.upstreams)) {
-      throw new Error('upstreams response shape invalid')
-    }
-
-    upstreams.value = payload.upstreams.filter(
-      (upstream): upstream is string => typeof upstream === 'string',
-    )
-    loadState.value = 'ready'
+    const payload = upstreamsResponseSchema.parse(await response.json())
+    upstreams.value = payload.upstreams
+    upstreamsLoadState.value = 'ready'
   } catch {
     upstreams.value = []
-    loadState.value = 'error'
+    upstreamsLoadState.value = 'error'
   }
 }
 
-onMounted(loadUpstreams)
+// 从公开 UI 数据接口加载最近 24 小时的 country -> edge colo 聚合数据。
+async function loadTrafficSankey() {
+  trafficSankeyLoadState.value = 'loading'
+
+  try {
+    const response = await fetch('/_internal/metrics/country-colo-sankey', {
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+    if (!response.ok) {
+      throw new Error(`traffic sankey request failed: ${response.status}`)
+    }
+
+    const payload = trafficSankeyResponseSchema.parse(await response.json())
+    trafficSankeyLinks.value = payload.links
+    trafficSankeyLoadState.value = 'ready'
+  } catch {
+    trafficSankeyLinks.value = []
+    trafficSankeyLoadState.value = 'error'
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadUpstreams(), loadTrafficSankey()])
+})
 </script>
 
 <template>
@@ -154,10 +181,10 @@ onMounted(loadUpstreams)
         </a>
         <span>{{ t('upstreams.introAfter') }}</span>
       </p>
-      <p v-if="loadState === 'loading'" class="muted">
+      <p v-if="upstreamsLoadState === 'loading'" class="muted">
         {{ t('upstreams.loading') }}
       </p>
-      <p v-else-if="loadState === 'error'" class="muted">
+      <p v-else-if="upstreamsLoadState === 'error'" class="muted">
         {{ t('upstreams.error') }}
       </p>
       <ul v-else>
@@ -165,6 +192,19 @@ onMounted(loadUpstreams)
           <a :href="upstream" target="_blank" rel="noreferrer">{{ upstream }}</a>
         </li>
       </ul>
+
+      <h2>{{ t('trafficSankey.title') }}</h2>
+      <p>{{ t('trafficSankey.summary') }}</p>
+      <p v-if="trafficSankeyLoadState === 'loading'" class="muted">
+        {{ t('trafficSankey.loading') }}
+      </p>
+      <p v-else-if="trafficSankeyLoadState === 'error'" class="muted">
+        {{ t('trafficSankey.error') }}
+      </p>
+      <p v-else-if="trafficSankeyLinks.length === 0" class="muted">
+        {{ t('trafficSankey.empty') }}
+      </p>
+      <TrafficSankeyChart v-else :links="trafficSankeyLinks" />
 
       <h2>{{ t('howItWorks.title') }}</h2>
       <p>

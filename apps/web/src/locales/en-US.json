@@ -14,6 +14,15 @@
     "loading": "Loading current upstreams…",
     "error": "The current upstream list is temporarily unavailable."
   },
+  "trafficSankey": {
+    "title": "Request Sources to Edge Colos in the Last 24 Hours",
+    "summary": "Aggregated regular proxy requests by source country or region and Cloudflare ingress colo.",
+    "loading": "Loading traffic distribution for the last 24 hours…",
+    "error": "Traffic distribution for the last 24 hours is temporarily unavailable.",
+    "empty": "No traffic distribution data is available for the last 24 hours.",
+    "chartAria": "Sankey chart from request source countries or regions to Cloudflare edge colos.",
+    "tooltipRequests": "Requests"
+  },
   "howItWorks": {
     "title": "How It Works",
     "introBefore": "This load balancer does ",

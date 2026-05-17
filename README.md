@@ -14,7 +14,7 @@ pnpm run dev:server
 pnpm run dev:web
 ```
 
-`dev:server` 使用 `apps/server/wrangler.jsonc` 启动 Cloudflare Worker，负责 RSSHub 转发、`/_internal/*` 数据接口、健康检查和状态存储访问。
+`dev:server` 使用 `apps/server/wrangler.jsonc` 启动 Cloudflare Worker，负责 RSSHub 转发、`/_internal/*` 数据接口、健康检查和状态存储访问。本地开发 secret 按 Wrangler 默认规则放在 `apps/server/.dev.vars`。
 
 `dev:web` 启动 Vite 首页开发服务，并把 `/_internal/*`、`/api/*`、`/healthz`、`/robots.txt` 代理到本地 Worker。
 
@@ -51,6 +51,18 @@ const app = new Hono<{ Bindings: CloudflareBindings }>()
 ## Analytics Engine metrics
 
 合并收益统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_metrics`。指标是近似统计，查询时需要使用 `_sample_interval` 修正采样。
+
+首页桑基图会由 Worker 代理查询 Workers Analytics Engine SQL API，需要配置两个 Worker secrets：
+
+- `CLOUDFLARE_ACCOUNT_ID`：当前数据集所在的 Cloudflare Account ID。
+- `CLOUDFLARE_ANALYTICS_API_TOKEN`：只读 Analytics token，权限为 `Account / Account Analytics / Read`，建议 token name 为 `rsshub-balancer-analytics-read`。
+
+本地开发时把这两个值写入 `apps/server/.dev.vars`；生产环境通过 Wrangler secret 写入 Cloudflare。
+
+```txt
+pnpm exec wrangler secret put CLOUDFLARE_ACCOUNT_ID --config apps/server/wrangler.jsonc
+pnpm exec wrangler secret put CLOUDFLARE_ANALYTICS_API_TOKEN --config apps/server/wrangler.jsonc
+```
 
 Metrics 查询 SQL 见 [docs/metrics.md](docs/metrics.md)。
 
