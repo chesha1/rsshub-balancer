@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { schemeSet3, schemeTableau10 } from 'd3-scale-chromatic'
 import { SankeyChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { use } from 'echarts/core'
@@ -30,6 +31,9 @@ const chartAriaLabel = computed(() => t('trafficSankey.chartAria'))
 const requestCountLabel = computed(() => t('trafficSankey.tooltipRequests'))
 
 use([CanvasRenderer, SankeyChart, TooltipComponent])
+
+// 使用 D3 维护的分类调色板，避免在图表配置里手写和维护大量颜色。
+const sankeyColorPalette = [...schemeTableau10, ...schemeSet3]
 
 // 判断未知 tooltip 数据是否是对象，避免 formatter 里直接信任第三方库参数。
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -109,7 +113,7 @@ const chartOption = computed(() => {
 
   return {
     animationDuration: 400,
-    color: ['#0969da', '#1f883d', '#8250df', '#bf8700', '#cf222e', '#0a3069'],
+    color: sankeyColorPalette,
     tooltip: {
       trigger: 'item',
       formatter: formatTooltip,
