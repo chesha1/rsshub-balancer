@@ -121,7 +121,11 @@ const chartOption = computed(() => {
     series: [
       {
         type: 'sankey',
-        data: Array.from(nodeNames, (name) => ({ name })),
+        data: Array.from(nodeNames, (name) => ({
+          name,
+          // 目标机房节点靠近右边缘，标签放到节点左侧才能稳定留在画布内部。
+          label: name.startsWith('colo:') ? { position: 'left' } : undefined,
+        })),
         links,
         draggable: false,
         nodeAlign: 'justify',
