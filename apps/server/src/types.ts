@@ -8,3 +8,15 @@ export type ResponseSnapshot = {
   headers: string[][]
   body: Uint8Array
 }
+
+export type RouteRequestOutcome =
+  | 'direct_upstream'
+  | 'isolate_coalesced'
+  | 'do_coalesced'
+
+// 一次可复用请求的处理结果，供 isolate / DO 合并层把最终服务方式带回入口指标。
+export type CoalescedRequestResult = {
+  snapshot: ResponseSnapshot
+  outcome: RouteRequestOutcome
+  upstream?: string
+}

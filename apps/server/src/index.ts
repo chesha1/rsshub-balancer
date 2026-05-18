@@ -13,9 +13,13 @@ import {
   withRequestLogContext,
   withResponseRequestId,
 } from './log'
-import { getRequestColo, getRequestCountry, recordMetric } from './metrics'
+import {
+  getRequestColo,
+  getRequestCountry,
+  recordRouteRequestMetric,
+} from './metrics'
 import { createStateStore } from './store'
-import type { ResponseSnapshot } from './types'
+import type { CoalescedRequestResult } from './types'
 import {
   cacheInstances,
   fetchFromUpstream,
@@ -40,7 +44,7 @@ type AppContext = Context<AppEnv>
 
 // isolate 级请求合并：key 为 method + requestPath，value 为正在进行的上游解析 promise。
 // 同一 isolate 内对同一路径同方法的并发 GET/HEAD 请求共享同一个 promise，leader 完成后条目自动清除。
-const inflight = new Map<string, Promise<ResponseSnapshot>>()
+const inflight = new Map<string, Promise<CoalescedRequestResult>>()
 
 // 临时降低 Durable Object 参与比例，先保留少量样本观察 Redis timeout 变化。
 const DO_SAMPLE_RATE = 0.01
@@ -345,23 +349,14 @@ app.all('/*', async (c) => {
     )
     const { response: res } = result
     const durationMs = Date.now() - startedAt
-    recordMetric(c.env.METRICS, {
-      metric: 'route_request',
-      layer: 'edge',
+    recordRouteRequestMetric(c.env.METRICS, {
       method,
       status: res.status,
       durationMs,
+      outcome: 'direct_upstream',
+      upstream: result.upstream,
       country: requestCountry,
       edgeColo: requestColo,
-    })
-    recordMetric(c.env.METRICS, {
-      metric: 'direct_upstream',
-      layer: 'edge',
-      method,
-      reason: 'non_get',
-      status: res.status,
-      durationMs,
-      upstream: result.upstream,
     })
     return res
   }
@@ -385,7 +380,7 @@ app.all('/*', async (c) => {
       event: 'coalesce.join',
       coalesceRole,
     })
-    promise = (async (): Promise<ResponseSnapshot> => {
+    promise = (async (): Promise<CoalescedRequestResult> => {
       try {
         let directReason: 'do_sampled_out' | 'do_rpc_failed' = 'do_sampled_out'
         let degradeError: Record<string, unknown> | undefined
@@ -414,17 +409,11 @@ app.all('/*', async (c) => {
           },
         )
         const snapshot = await fromResponse(result.response)
-        recordMetric(c.env.METRICS, {
-          metric: 'direct_upstream',
-          layer: 'isolate',
-          role: 'leader',
-          method,
-          reason: directReason,
-          status: snapshot.status,
-          durationMs: Date.now() - startedAt,
+        return {
+          snapshot,
+          outcome: 'direct_upstream',
           upstream: result.upstream,
-        })
-        return snapshot
+        }
       } finally {
         inflight.delete(coalesceKey)
       }
@@ -432,42 +421,25 @@ app.all('/*', async (c) => {
     inflight.set(coalesceKey, promise)
   }
 
-  const snapshot = await promise
+  const result = await promise
+  const snapshot = result.snapshot
   const durationMs = Date.now() - startedAt
-  const coalesceRoleMetric =
-    coalesceRole === 'isolate-leader' ? 'leader' : 'follower'
-  recordMetric(c.env.METRICS, {
-    metric: 'route_request',
-    layer: 'edge',
+  const routeRequestOutcome =
+    coalesceRole === 'isolate-follower' ? 'isolate_coalesced' : result.outcome
+  recordRouteRequestMetric(c.env.METRICS, {
     method,
     status: snapshot.status,
     durationMs,
+    outcome: routeRequestOutcome,
+    upstream:
+      routeRequestOutcome === 'direct_upstream' ? result.upstream : undefined,
     country: requestCountry,
     edgeColo: requestColo,
   })
-  recordMetric(c.env.METRICS, {
-    metric: 'coalesce_role',
-    layer: 'isolate',
-    role: coalesceRoleMetric,
-    method,
-    reason: coalesceRole === 'isolate-follower' ? 'isolate_follower' : 'none',
-    status: snapshot.status,
-    durationMs,
-  })
-  if (coalesceRole === 'isolate-follower') {
-    recordMetric(c.env.METRICS, {
-      metric: 'benefited',
-      layer: 'isolate',
-      role: 'follower',
-      method,
-      reason: 'isolate_follower',
-      status: snapshot.status,
-      durationMs,
-    })
-  }
   httpLogger.info('isolate coalescing completed', {
     event: 'coalesce.completed',
     coalesceRole,
+    routeRequestOutcome,
     status: snapshot.status,
     durationMs,
   })

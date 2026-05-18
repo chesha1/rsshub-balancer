@@ -1,32 +1,11 @@
 import { errorProps, metricsLogger } from './log'
+import type { RouteRequestOutcome } from './types'
 
-export type MetricsMetric =
-  | 'route_request'
-  | 'coalesce_role'
-  | 'direct_upstream'
-  | 'benefited'
-
-export type MetricsLayer = 'edge' | 'isolate' | 'do'
-
-export type MetricsRole = 'leader' | 'follower' | 'none'
-
-export type MetricsReason =
-  | 'non_get'
-  | 'do_leader'
-  | 'do_rpc_failed'
-  | 'do_sampled_out'
-  | 'isolate_follower'
-  | 'do_follower'
-  | 'none'
-
-type RecordMetricOptions = {
-  metric: MetricsMetric
-  layer: MetricsLayer
-  role?: MetricsRole
+type RecordRouteRequestMetricOptions = {
   method?: string
-  reason?: MetricsReason
   status?: number
   durationMs?: number
+  outcome: RouteRequestOutcome
   upstream?: string
   country?: string
   edgeColo?: string
@@ -52,14 +31,12 @@ export function getRequestColo(request: Request): string {
   return normalizedColo.length > 0 ? normalizedColo : 'unknown'
 }
 
-// 将合并收益事件写入 Analytics Engine；写入失败只记录日志，不能影响主请求。
-export function recordMetric(
+// 记录入口请求最终由哪种方式服务；写入失败只记录日志，不能影响主请求。
+export function recordRouteRequestMetric(
   metrics: AnalyticsEngineDataset,
-  options: RecordMetricOptions,
+  options: RecordRouteRequestMetricOptions,
 ) {
-  const role = options.role ?? 'none'
   const method = options.method ?? 'none'
-  const reason = options.reason ?? 'none'
   const status = options.status === undefined ? 'none' : String(options.status)
   const durationMs = options.durationMs ?? 0
   const upstream = options.upstream ?? 'none'
@@ -70,11 +47,11 @@ export function recordMetric(
     metrics.writeDataPoint({
       indexes: ['global'],
       blobs: [
-        options.metric,
-        options.layer,
-        role,
+        'route_request',
+        'edge',
+        'none',
         method,
-        reason,
+        options.outcome,
         status,
         upstream,
         country,
@@ -86,11 +63,11 @@ export function recordMetric(
     metricsLogger.warn('analytics engine metric write failed', {
       event: 'metrics.write',
       outcome: 'failed',
-      metric: options.metric,
-      layer: options.layer,
-      role,
+      metric: 'route_request',
+      layer: 'edge',
+      role: 'none',
       method,
-      reason,
+      routeRequestOutcome: options.outcome,
       status,
       upstream,
       country,
