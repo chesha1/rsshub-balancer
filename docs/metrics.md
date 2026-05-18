@@ -118,6 +118,33 @@ GROUP BY country, edge_colo, outcome
 ORDER BY request_total DESC
 ```
 
+## 最近 24 小时请求来源到入口机房到处理方式到 upstream 分布
+
+当前 `route_request` 只有 `direct_upstream` outcome 会记录最终真实触达的 upstream，字段存在 `blob7`；被 isolate 或 Durable Object 合并复用的 follower 请求不会真实打到上游，当前 upstream 维度归为 `not_recorded`。这个 SQL 保留上一段 `country -> edge_colo -> outcome` 的全部结果，只是在最后追加 upstream 维度。
+
+```sql
+SELECT
+  if(blob8 = '', 'unknown', blob8) AS country,
+  if(blob9 = '', 'unknown', blob9) AS edge_colo,
+  blob5 AS outcome,
+  if(
+    blob5 = 'direct_upstream' AND blob7 != '' AND blob7 != 'none',
+    blob7,
+    'not_recorded'
+  ) AS upstream,
+  sum(_sample_interval * double1) AS request_total
+FROM rsshub_balancer_metrics
+WHERE timestamp > NOW() - INTERVAL '1' DAY
+  AND blob1 = 'route_request'
+  AND blob5 IN (
+    'direct_upstream',
+    'isolate_coalesced',
+    'do_coalesced'
+  )
+GROUP BY country, edge_colo, outcome, upstream
+ORDER BY request_total DESC
+```
+
 ## 最近 24 小时 upstream 请求数量
 
 真实打到上游的入口请求会用 `route_request` 的 `direct_upstream` outcome 记录，最终触达的 upstream 存在 `blob7`。这个 SQL 用来查看各 upstream 在实际请求中的近似请求数。
