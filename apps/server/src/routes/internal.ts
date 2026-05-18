@@ -1,71 +1,61 @@
 import { errorProps, httpLogger } from '../log'
 import { createStateStore } from '../store'
-import type { AppContext } from '../types'
+import type { AppContext, RouteRequestOutcome } from '../types'
 import { getUpstreams } from '../upstream'
 
-type CountryColoSankeyLink = {
-  source: string
-  target: string
+type CountryColoSankeyRow = {
+  country: string
+  edgeColo: string
+  outcome: RouteRequestOutcome
+  upstream: string
   value: number
+}
+
+type CountryColoSankeySqlRow = {
+  country: string
+  edge_colo: string
+  outcome: RouteRequestOutcome
+  upstream: string
+  request_total: number
 }
 
 const TRAFFIC_SANKEY_WINDOW_HOURS = 24
 
 const COUNTRY_COLO_SANKEY_QUERY = `
 SELECT
-  if(blob8 = '', 'unknown', blob8) AS country,
-  if(blob9 = '', 'unknown', blob9) AS edge_colo,
+  blob8 AS country,
+  blob9 AS edge_colo,
+  blob5 AS outcome,
+  if(
+    blob5 = 'direct_upstream' AND blob7 != '' AND blob7 != 'none',
+    blob7,
+    'not_recorded'
+  ) AS upstream,
   sum(_sample_interval * double1) AS request_total
 FROM rsshub_balancer_metrics
 WHERE timestamp > NOW() - INTERVAL '1' DAY
   AND blob1 = 'route_request'
-GROUP BY country, edge_colo
+  AND blob5 IN (
+    'direct_upstream',
+    'isolate_coalesced',
+    'do_coalesced'
+  )
+GROUP BY country, edge_colo, outcome, upstream
 ORDER BY request_total DESC
 FORMAT JSON
 `
 
-// 判断未知 JSON 值是否是普通对象，供 Analytics Engine 响应解析复用。
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-// 将 Analytics Engine 维度值统一规整为可展示的非空字符串。
-function normalizeMetricDimension(value: unknown): string {
-  if (typeof value !== 'string') return 'unknown'
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : 'unknown'
-}
-
-// 将 Analytics Engine 聚合计数转成桑基图可用的有限非负数。
-function normalizeMetricCount(value: unknown): number {
-  const normalized = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(normalized) || normalized < 0) {
-    throw new Error('analytics row count invalid')
-  }
-
-  return normalized
-}
-
-// 从 Analytics Engine SQL API 响应中提取 country -> edge colo 的桑基图 link。
-function parseCountryColoSankeyLinks(
-  payload: unknown,
-): CountryColoSankeyLink[] {
-  if (!isRecord(payload) || !Array.isArray(payload.data)) {
-    throw new Error('analytics response shape invalid')
-  }
-
-  return payload.data.map((row) => {
-    if (!isRecord(row)) {
-      throw new Error('analytics row shape invalid')
-    }
-
-    return {
-      source: normalizeMetricDimension(row.country),
-      target: normalizeMetricDimension(row.edge_colo),
-      value: normalizeMetricCount(row.request_total),
-    }
-  })
+// 将 SQL API 的列名转换成前端约定的 camelCase 字段。
+function parseCountryColoSankeyRows(payload: {
+  data: CountryColoSankeySqlRow[]
+}): CountryColoSankeyRow[] {
+  return payload.data.map((row) => ({
+    country: row.country,
+    edgeColo: row.edge_colo,
+    outcome: row.outcome,
+    upstream: row.upstream,
+    value: row.request_total,
+  }))
 }
 
 // 从公开 UI 数据命名空间返回当前上游列表，响应中不暴露状态存储错误细节。
@@ -96,7 +86,7 @@ export async function handleInternalUpstreams(c: AppContext) {
   }
 }
 
-// 查询最近 24 小时来源国家/地区到入口机房的聚合分布，供首页桑基图展示。
+// 查询最近 24 小时来源、入口机房、处理结果和真实上游的聚合分布，供首页桑基图展示。
 export async function handleCountryColoSankey(c: AppContext) {
   if (c.req.method !== 'GET') {
     return c.text('Method Not Allowed', 405, {
@@ -139,9 +129,11 @@ export async function handleCountryColoSankey(c: AppContext) {
       throw new Error(`analytics query failed: ${response.status}`)
     }
 
-    const payload = await response.json()
+    const payload = (await response.json()) as {
+      data: CountryColoSankeySqlRow[]
+    }
     return c.json({
-      links: parseCountryColoSankeyLinks(payload),
+      rows: parseCountryColoSankeyRows(payload),
       generatedAt: new Date().toISOString(),
       windowHours: TRAFFIC_SANKEY_WINDOW_HOURS,
     })

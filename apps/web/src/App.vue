@@ -5,7 +5,7 @@ import { setAppLocale } from './i18n'
 import TrafficSankeyChart from './TrafficSankeyChart.vue'
 import {
   trafficSankeyResponseSchema,
-  type TrafficSankeyLink,
+  type TrafficSankeyRow,
   upstreamsResponseSchema,
 } from './types'
 
@@ -87,7 +87,7 @@ const compatibilityRows: CompatibilityRow[] = [
 
 const upstreams = ref<string[]>([])
 const upstreamsLoadState = ref<LoadState>('loading')
-const trafficSankeyLinks = ref<TrafficSankeyLink[]>([])
+const trafficSankeyRows = ref<TrafficSankeyRow[]>([])
 const trafficSankeyLoadState = ref<LoadState>('loading')
 const { t, locale } = useI18n()
 
@@ -124,7 +124,7 @@ async function loadUpstreams() {
   }
 }
 
-// 从公开 UI 数据接口加载最近 24 小时的 country -> edge colo 聚合数据。
+// 从公开 UI 数据接口加载最近 24 小时的首页桑基图四维原始聚合数据。
 async function loadTrafficSankey() {
   trafficSankeyLoadState.value = 'loading'
 
@@ -139,10 +139,10 @@ async function loadTrafficSankey() {
     }
 
     const payload = trafficSankeyResponseSchema.parse(await response.json())
-    trafficSankeyLinks.value = payload.links
+    trafficSankeyRows.value = payload.rows
     trafficSankeyLoadState.value = 'ready'
   } catch {
-    trafficSankeyLinks.value = []
+    trafficSankeyRows.value = []
     trafficSankeyLoadState.value = 'error'
   }
 }
@@ -201,10 +201,10 @@ onMounted(async () => {
       <p v-else-if="trafficSankeyLoadState === 'error'" class="muted">
         {{ t('trafficSankey.error') }}
       </p>
-      <p v-else-if="trafficSankeyLinks.length === 0" class="muted">
+      <p v-else-if="trafficSankeyRows.length === 0" class="muted">
         {{ t('trafficSankey.empty') }}
       </p>
-      <TrafficSankeyChart v-else :links="trafficSankeyLinks" />
+      <TrafficSankeyChart v-else :rows="trafficSankeyRows" />
 
       <h2>{{ t('howItWorks.title') }}</h2>
       <p>

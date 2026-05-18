@@ -15,12 +15,26 @@
     "error": "The current upstream list is temporarily unavailable."
   },
   "trafficSankey": {
-    "title": "Request Sources to Edge Colos in the Last 24 Hours",
-    "summary": "Aggregated regular proxy requests by source country or region and Cloudflare ingress colo.",
+    "title": "Request Flow in the Last 24 Hours",
+    "summary": "Aggregated regular proxy requests by source country or region, Cloudflare ingress colo, handling outcome, and the upstream that was actually reached.",
     "loading": "Loading traffic distribution for the last 24 hours…",
     "error": "Traffic distribution for the last 24 hours is temporarily unavailable.",
     "empty": "No traffic distribution data is available for the last 24 hours.",
-    "chartAria": "Sankey chart from request source countries or regions to Cloudflare edge colos.",
+    "chartAria": "Sankey chart across request source countries or regions, Cloudflare edge colos, handling outcomes, and real upstreams.",
+    "columnsAria": "Choose which dimension columns are shown in the homepage traffic Sankey chart.",
+    "columnsLabel": "Columns",
+    "columns": {
+      "country": "Country/region",
+      "edgeColo": "Edge colo",
+      "outcome": "Outcome",
+      "upstream": "Real upstream"
+    },
+    "outcomeValues": {
+      "directUpstream": "Direct upstream",
+      "isolateCoalesced": "Isolate coalesced",
+      "doCoalesced": "DO coalesced"
+    },
+    "upstreamNotRecorded": "Not recorded",
     "tooltipRequests": "Requests"
   },
   "howItWorks": {

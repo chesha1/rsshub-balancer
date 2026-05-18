@@ -4,14 +4,22 @@ export const upstreamsResponseSchema = z.object({
   upstreams: z.array(z.string()),
 })
 
-export const trafficSankeyLinkSchema = z.object({
-  source: z.string(),
-  target: z.string(),
+const trafficSankeyOutcomeSchema = z.enum([
+  'direct_upstream',
+  'isolate_coalesced',
+  'do_coalesced',
+])
+
+export const trafficSankeyRowSchema = z.object({
+  country: z.string(),
+  edgeColo: z.string(),
+  outcome: trafficSankeyOutcomeSchema,
+  upstream: z.string(),
   value: z.number(),
 })
 
 export const trafficSankeyResponseSchema = z.object({
-  links: z.array(trafficSankeyLinkSchema),
+  rows: z.array(trafficSankeyRowSchema),
 })
 
-export type TrafficSankeyLink = z.infer<typeof trafficSankeyLinkSchema>
+export type TrafficSankeyRow = z.infer<typeof trafficSankeyRowSchema>

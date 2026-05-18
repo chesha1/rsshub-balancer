@@ -15,12 +15,26 @@
     "error": "当前实例列表暂时不可用。"
   },
   "trafficSankey": {
-    "title": "最近 24 小时请求来源到入口机房分布",
-    "summary": "按来源国家/地区和 Cloudflare 入口机房聚合普通入口代理请求。",
+    "title": "最近 24 小时请求流向分布",
+    "summary": "按来源国家/地区、Cloudflare 入口机房、处理结果和真实触达的上游聚合普通入口代理请求。",
     "loading": "正在加载最近 24 小时流量分布…",
     "error": "最近 24 小时流量分布暂时不可用。",
     "empty": "最近 24 小时暂无可展示的流量分布数据。",
-    "chartAria": "请求来源国家或地区到 Cloudflare 入口机房的桑基图。",
+    "chartAria": "请求来源国家或地区、Cloudflare 入口机房、处理结果和真实上游的桑基图。",
+    "columnsAria": "选择首页流量桑基图显示的维度列。",
+    "columnsLabel": "显示列",
+    "columns": {
+      "country": "来源国家/地区",
+      "edgeColo": "入口机房",
+      "outcome": "处理结果",
+      "upstream": "真实上游"
+    },
+    "outcomeValues": {
+      "directUpstream": "直连上游",
+      "isolateCoalesced": "Isolate 合并",
+      "doCoalesced": "DO 合并"
+    },
+    "upstreamNotRecorded": "未记录",
     "tooltipRequests": "请求数"
   },
   "howItWorks": {
