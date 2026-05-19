@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:server": "wrangler dev --config apps/server/wrangler.jsonc --remote",
+    "dev:server": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run @rsshub-balancer/server:dev",
     "dev:web": "vite dev --config apps/web/vite.config.ts",
     "build": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run-many -t build",
     "typecheck": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run-many -t typecheck",
