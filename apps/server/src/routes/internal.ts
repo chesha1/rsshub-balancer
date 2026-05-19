@@ -1,6 +1,7 @@
+import { Hono } from 'hono'
 import { errorProps, httpLogger } from '../log'
 import { createStateStore } from '../store'
-import type { AppContext, RouteRequestOutcome } from '../types'
+import type { AppContext, AppEnv, RouteRequestOutcome } from '../types'
 import { getUpstreams } from '../upstream'
 
 type CountryColoSankeyRow = {
@@ -44,6 +45,8 @@ GROUP BY country, edge_colo, outcome, upstream
 ORDER BY request_total DESC
 FORMAT JSON
 `
+
+const internalRoutes = new Hono<AppEnv>()
 
 // 将 SQL API 的列名转换成前端约定的 camelCase 字段。
 function parseCountryColoSankeyRows(payload: {
@@ -146,3 +149,8 @@ export async function handleCountryColoSankey(c: AppContext) {
     return c.json({ error: 'internal_error' }, 500)
   }
 }
+
+internalRoutes.all('/upstreams', handleInternalUpstreams)
+internalRoutes.all('/metrics/country-colo-sankey', handleCountryColoSankey)
+
+export default internalRoutes

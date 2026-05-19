@@ -15,10 +15,7 @@ import {
   getRequestCountry,
   recordRouteRequestMetric,
 } from './metrics'
-import {
-  handleCountryColoSankey,
-  handleInternalUpstreams,
-} from './routes/internal'
+import internalRoutes from './routes/internal'
 import { scheduled } from './scheduled'
 import { createStateStore } from './store'
 import type { AppEnv, CoalescedRequestResult } from './types'
@@ -111,8 +108,7 @@ app.use(
   }),
 )
 
-app.all('/_internal/upstreams', handleInternalUpstreams)
-app.all('/_internal/metrics/country-colo-sankey', handleCountryColoSankey)
+app.route('/_internal', internalRoutes)
 app.get('/healthz', async (c) => {
   const upstreams = await getUpstreams(createStateStore(c.env), {
     waitUntil: (p) => c.executionCtx.waitUntil(p),
