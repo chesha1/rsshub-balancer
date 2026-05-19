@@ -155,14 +155,14 @@ onMounted(async () => {
 <template>
   <main class="page-shell">
     <div class="page-toolbar">
-      <button
+      <el-button
         class="language-toggle"
-        type="button"
+        native-type="button"
         :aria-label="t('language.switchAria')"
         @click="switchLocale"
       >
         {{ languageButtonLabel }}
-      </button>
+      </el-button>
     </div>
 
     <section class="language-section" aria-labelledby="page-title">

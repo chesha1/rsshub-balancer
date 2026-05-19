@@ -1,3 +1,5 @@
+import { ElButton } from 'element-plus/es/components/button/index'
+import 'element-plus/es/components/button/style/css'
 import {
   ElCheckbox,
   ElCheckboxGroup,
@@ -11,6 +13,7 @@ import './style.css'
 
 const app = createApp(App)
 
+app.use(ElButton)
 app.use(ElCheckbox)
 app.use(ElCheckboxGroup)
 app.use(i18n)
