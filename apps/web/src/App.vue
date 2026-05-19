@@ -169,6 +169,13 @@ onMounted(async () => {
       <h1 id="page-title">{{ t('hero.title') }}</h1>
       <p>{{ t('hero.summary') }}</p>
 
+      <h2>{{ t('usage.title') }}</h2>
+      <p>
+        <span>{{ t('usage.bodyBeforeExample') }}</span>
+        <code>{{ t('usage.exampleRoute') }}</code>
+        <span>{{ t('usage.bodyAfterExample') }}</span>
+      </p>
+
       <h2>{{ t('upstreams.title') }}</h2>
       <p>
         <span>{{ t('upstreams.introBefore') }}</span>

@@ -6,6 +6,12 @@
     "title": "RSSHub Balancer",
     "summary": "Load balancer for multiple RSSHub instances — reuses cached responses and reduces redundant fetching."
   },
+  "usage": {
+    "title": "How to Use",
+    "bodyBeforeExample": "Use this site like any regular RSSHub instance: append an RSSHub route after this domain, for example ",
+    "exampleRoute": "/github/repos/DIYgod/RSSHub/releases",
+    "bodyAfterExample": ". If you already use another RSSHub instance, replace only the domain in your feed URL and keep the path and query string unchanged."
+  },
   "upstreams": {
     "title": "Current Upstreams",
     "introBefore": "Instances below are automatically synced from the ",

@@ -6,6 +6,12 @@
     "title": "RSSHub Balancer",
     "summary": "为多个 RSSHub 实例做负载均衡，复用缓存响应，减少重复抓取。"
   },
+  "usage": {
+    "title": "如何使用",
+    "bodyBeforeExample": "把本站当作普通 RSSHub 实例使用即可：在本站域名后直接追加 RSSHub 路由，例如 ",
+    "exampleRoute": "/github/repos/DIYgod/RSSHub/releases",
+    "bodyAfterExample": "。如果你已经在使用其他 RSSHub 实例，只需要把订阅链接里的域名替换成本页面域名，后面的路径和参数保持不变。"
+  },
   "upstreams": {
     "title": "当前上游实例",
     "introBefore": "以下实例自动从",
