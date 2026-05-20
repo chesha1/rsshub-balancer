@@ -4,11 +4,11 @@
   "type": "module",
   "dependencies": {
     "d3-scale-chromatic": "^3.1.0",
-    "echarts": "^6.0.0",
-    "element-plus": "^2.13.7",
-    "vue": "^3.5.25",
+    "echarts": "^6.1.0",
+    "element-plus": "^2.14.0",
+    "vue": "^3.5.34",
     "vue-echarts": "^8.0.1",
-    "vue-i18n": "^11.4.2",
+    "vue-i18n": "^11.4.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {

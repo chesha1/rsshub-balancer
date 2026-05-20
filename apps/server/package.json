@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@logtape/hono": "^2.0.5",
-    "@logtape/logtape": "^2.0.5",
+    "@logtape/hono": "^2.1.1",
+    "@logtape/logtape": "^2.1.1",
     "@redis/client": "^5.12.1",
     "@upstash/redis": "^1.38.0",
-    "hono": "^4.12.14",
-    "uuid": "^13.0.0"
+    "hono": "^4.12.21",
+    "uuid": "^14.0.0"
   }
 }
