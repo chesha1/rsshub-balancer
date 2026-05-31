@@ -41,7 +41,7 @@ RSSHub Balancer —— 为多个 RSSHub 实例做负载均衡，复用缓存响�
 - `apps/server/src/types.ts` — 共享类型定义（`ResponseSnapshot`）
 - `apps/server/src/config.ts` — 上游 RSSHub 实例列表及 `failTtl` 等参数
 - `apps/server/src/utils.ts` — 共享工具函数（`trimSlash`、`shuffle`、`fromResponse`、`toResponse`）
-- `apps/server/wrangler.jsonc` — Cloudflare Worker 配置，KV 绑定名为 `KV`，Durable Object 绑定名为 `DO`，Workers Analytics Engine 绑定名为 `METRICS`，Static Assets 绑定名为 `ASSETS`（通过 `env.KV`、`env.DO`、`env.METRICS`、`env.ASSETS` 访问）。状态存储中保存两类数据：`instances`（JSON 数组，健康的上游 URL 列表）和 `fail:<upstream>|<pathname>`（单条上游对特定路由的失败标记，TTL 由 `config.failTtl` 控制）
+- `apps/server/wrangler.jsonc` — Cloudflare Worker 配置，KV 绑定名为 `KV`，Durable Object 绑定名为 `DO`，Workers Analytics Engine 绑定名为 `METRICS`，Static Assets 绑定名为 `ASSETS`（通过 `env.KV`、`env.DO`、`env.METRICS`、`env.ASSETS` 访问）。状态存储中保存两类数据：`instances`（JSON 数组，健康的上游 URL 列表）和 `fail:<encoded-upstream>:<encoded-pathname>`（单条上游对特定路由的失败标记，TTL 由 `config.failTtl` 控制）
 - `apps/web` — Vue3 / Vite 首页，前端只请求公开 UI 数据接口 `GET /_internal/upstreams`
 
 ### 路由策略

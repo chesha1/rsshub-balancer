@@ -31,7 +31,7 @@
 - `STATE_STORE_BACKEND=redis` 需要配置 `VALKEY_URL`。
 - `STATE_STORE_BACKEND=redis-http` 需要配置 `REDIS_HTTP_URL` 和 `REDIS_HTTP_TOKEN`，也兼容 `UPSTASH_REDIS_REST_URL` 与 `UPSTASH_REDIS_REST_TOKEN`。
 - `STATE_STORE_BACKEND=kv` 使用 Worker 绑定里的 `KV` namespace。
-- 三种后端共享同一组业务语义：`instances` 保存上游实例列表，`fail:<upstream>:<pathname>` 保存某个上游对某个路径的临时失败标记。
+- 三种后端共享同一组业务语义：`instances` 保存上游实例列表，`fail:<encoded-upstream>:<encoded-pathname>` 保存某个上游对某个路径的临时失败标记。
 - 直连 Redis 已改成单命令短连接：每次状态存储操作执行 `connect -> command -> destroy`，不再跨请求或跨命令复用同一个 Redis client。
 - `instances` 已经有运行时内存缓存和后台刷新，避免每个请求都强依赖一次状态存储读取。
 
