@@ -217,14 +217,11 @@ export async function fetchFromUpstream(
       failedUpstreams = new Set()
     }
 
-    // 分为 healthy / unhealthy 两组，各组内随机洗牌
+    // 失败标记在 TTL 内表示该路由近期已在对应上游失败，本次直接跳过这些候选。
     const healthyUpstreams = upstreams.filter((u) => !failedUpstreams.has(u))
     healthyUpstreamCount = healthyUpstreams.length
     failedUpstreamCount = failedUpstreams.size
-    const orderedUpstreams = [
-      ...shuffle(healthyUpstreams),
-      ...shuffle(upstreams.filter((u) => failedUpstreams.has(u))),
-    ]
+    const orderedUpstreams = shuffle(healthyUpstreams)
 
     prepareDurationMs = Date.now() - startedAt
     probeCount = orderedUpstreams.length
