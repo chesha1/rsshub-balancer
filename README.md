@@ -81,6 +81,7 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 - [Metrics 查询](docs/metrics.md)
 - [状态存储后端](docs/state-store-backends.md)
 - [项目能力边界](docs/capability-boundary.md)
+- [云下完整 LB 分流计划](docs/origin-plane-split-plan.md)
 
 ## 开发
 
