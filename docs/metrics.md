@@ -4,7 +4,7 @@
 
 ## 字段与 label
 
-当前只保留 `route_request` 作为主指标：每个入口代理请求完成后写入一条数据点。所有数据点都写入同一个全局索引，`index1` 固定为 `global`；用 `double1` 记录事件计数，固定写入 `1`；用 `double2` 记录这次入口请求耗时，单位是毫秒。
+当前只保留 `route_request` 作为主指标：每个进入代理/路由处理的入口请求完成后写入一条数据点。边缘层直接处理的 `OPTIONS` 请求不会进入上游转发，也不会写入 `route_request`。所有数据点都写入同一个全局索引，`index1` 固定为 `global`；用 `double1` 记录事件计数，固定写入 `1`；用 `double2` 记录这次入口请求耗时，单位是毫秒。
 
 | 字段 | label | 当前取值 | 说明 |
 | --- | --- | --- | --- |
@@ -52,7 +52,7 @@ ORDER BY request_total DESC
 
 ## 最近 24 小时请求 Method 分布
 
-请求入口会用 `route_request` 指标记录收到的请求，method 存在 `blob4`。这个 SQL 用来查看当前时间窗口内实际收到过哪些 HTTP methods，以及每种 method 的近似请求数。
+进入代理/路由处理的入口请求会用 `route_request` 指标记录 method，存在 `blob4`。边缘层直接响应的 `OPTIONS` 不再计入这里的 method 分布。这个 SQL 用来查看当前时间窗口内进入代理处理过哪些 HTTP methods，以及每种 method 的近似请求数。
 
 ```sql
 SELECT

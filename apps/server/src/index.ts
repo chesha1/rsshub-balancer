@@ -1,5 +1,6 @@
 import { honoLogger } from '@logtape/hono'
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { requestId } from 'hono/request-id'
 import { v7 as uuidv7 } from 'uuid'
 import {
@@ -59,6 +60,16 @@ const notFoundRoutes = [
   '/favicon.ico',
 ] as const
 
+const corsAllowMethods = [
+  'GET',
+  'HEAD',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'OPTIONS',
+]
+
 // 访问日志是否静默只由路径决定，方便和具体 middleware 配置解耦。
 function shouldSkipAccessLog(path: string) {
   return (
@@ -105,6 +116,16 @@ app.use(
       referrer:
         c.req.header('referrer') ?? c.req.header('referer') ?? undefined,
     }),
+  }),
+)
+
+// CORS/OPTIONS 是边缘层协议能力，不进入后续业务路由和上游转发。
+app.use(
+  cors({
+    origin: '*',
+    allowMethods: corsAllowMethods,
+    maxAge: 86400,
+    exposeHeaders: ['X-Request-Id'],
   }),
 )
 
