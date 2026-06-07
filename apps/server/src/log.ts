@@ -109,7 +109,7 @@ configureSync({
     {
       category: ['rsshub-balancer'],
       sinks: ['console'],
-      lowestLevel: 'info',
+      lowestLevel: 'warning',
     },
     {
       category: ['logtape'],
