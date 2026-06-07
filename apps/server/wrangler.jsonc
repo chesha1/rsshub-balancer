@@ -50,7 +50,12 @@
   ],
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      // Cloudflare tracing 默认采样 100%；先保守采样 1%，避免 span 事件量越界。
+      "head_sampling_rate": 0.01
+    }
   },
   "triggers": {
     "crons": ["0 * * * *"]
