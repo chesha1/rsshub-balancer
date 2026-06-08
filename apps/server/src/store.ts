@@ -115,7 +115,7 @@ function parseInstances(raw: string | string[] | null): string[] | undefined {
 
 // 统一生成失败标记 key；动态输入段先编码，避免冒号破坏 key 分隔语义。
 function failedUpstreamKey(upstream: string, pathname: string): string {
-  return `fail:${encodeURIComponent(upstream)}:${encodeURIComponent(pathname)}`
+  return `fail:${encodeURIComponent(pathname)}:${encodeURIComponent(upstream)}`
 }
 
 // 规范化状态存储后端配置；未知值回退到 KV，并写日志提示配置问题。

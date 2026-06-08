@@ -204,11 +204,6 @@ export async function fetchFromUpstream(
     const pathname = url.pathname
     const method = tracedRequest.method
     const headers = tracedRequest.headers
-    // 非幂等请求需要缓冲 body 以支持顺序重试
-    const body =
-      method !== 'GET' && method !== 'HEAD'
-        ? await tracedRequest.arrayBuffer()
-        : undefined
     // 并行读取所有上游对当前路由的失败记录；失败时按全健康处理。
     let failedUpstreams: Set<string>
     try {
@@ -221,6 +216,35 @@ export async function fetchFromUpstream(
     const healthyUpstreams = upstreams.filter((u) => !failedUpstreams.has(u))
     healthyUpstreamCount = healthyUpstreams.length
     failedUpstreamCount = failedUpstreams.size
+    if (healthyUpstreamCount === 0) {
+      prepareDurationMs = Date.now() - startedAt
+      upstreamLogger.error('all upstreams marked failed; skipping fetch', {
+        event: 'upstream.fetch',
+        outcome: 'all_marked_failed',
+        status: 502,
+        durationMs: Date.now() - startedAt,
+        prepareDurationMs,
+        upstreamCount: upstreams.length,
+        healthyUpstreamCount,
+        failedUpstreamCount,
+        ...logContext,
+      })
+      return {
+        response: withResponseRequestId(
+          new Response('All upstreams failed to handle this request', {
+            status: 502,
+            headers: { 'content-type': 'text/plain; charset=UTF-8' },
+          }),
+        ),
+        upstream: finalUpstreamHost,
+      }
+    }
+
+    // 非幂等请求需要缓冲 body 以支持顺序重试；没有健康候选时不再提前消费 body。
+    const body =
+      method !== 'GET' && method !== 'HEAD'
+        ? await tracedRequest.arrayBuffer()
+        : undefined
     const orderedUpstreams = shuffle(healthyUpstreams)
 
     prepareDurationMs = Date.now() - startedAt
