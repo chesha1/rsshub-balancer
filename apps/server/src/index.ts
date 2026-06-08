@@ -1,6 +1,5 @@
 import { honoLogger } from '@logtape/hono'
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
 import { requestId } from 'hono/request-id'
 import { v7 as uuidv7 } from 'uuid'
 import {
@@ -60,15 +59,8 @@ const notFoundRoutes = [
   '/favicon.ico',
 ] as const
 
-const corsAllowMethods = [
-  'GET',
-  'HEAD',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE',
-  'OPTIONS',
-]
+const publicProxyAllowedMethods = new Set(['GET', 'HEAD'])
+const PUBLIC_PROXY_ALLOW_HEADER = 'GET, HEAD'
 
 // 访问日志是否静默只由路径决定，方便和具体 middleware 配置解耦。
 function shouldSkipAccessLog(path: string) {
@@ -116,16 +108,6 @@ app.use(
       referrer:
         c.req.header('referrer') ?? c.req.header('referer') ?? undefined,
     }),
-  }),
-)
-
-// CORS/OPTIONS 是边缘层协议能力，不进入后续业务路由和上游转发。
-app.use(
-  cors({
-    origin: '*',
-    allowMethods: corsAllowMethods,
-    maxAge: 86400,
-    exposeHeaders: ['X-Request-Id'],
   }),
 )
 
@@ -185,9 +167,15 @@ for (const path of notFoundRoutes) {
 app.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /'))
 
 app.all('/*', async (c) => {
+  const method = c.req.method
+  if (!publicProxyAllowedMethods.has(method)) {
+    return c.text('Method Not Allowed', 405, {
+      Allow: PUBLIC_PROXY_ALLOW_HEADER,
+    })
+  }
+
   const url = new URL(c.req.url)
   const requestPath = url.pathname + url.search
-  const method = c.req.method
   const coalesceKey = `${method} ${requestPath}`
   const request = c.req.raw
   const requestCountry = getRequestCountry(request)
@@ -195,29 +183,7 @@ app.all('/*', async (c) => {
   const startedAt = Date.now()
   const stateStore = createStateStore(c.env)
 
-  // GET/HEAD 是安全方法，参与两级请求合并；其他方法直接转发上游并返回原始 Response。
-  if (method !== 'GET' && method !== 'HEAD') {
-    const result = await fetchFromUpstream(
-      request,
-      stateStore,
-      // 把失败标记等后台写入交给 waitUntil，避免阻塞当前响应。
-      (p) => c.executionCtx.waitUntil(p),
-    )
-    const { response: res } = result
-    const durationMs = Date.now() - startedAt
-    recordRouteRequestMetric(c.env.METRICS, {
-      method,
-      status: res.status,
-      durationMs,
-      outcome: 'direct_upstream',
-      upstream: result.upstream,
-      country: requestCountry,
-      edgeColo: requestColo,
-    })
-    return res
-  }
-
-  // GET/HEAD：两层合并（isolate 级 → Durable Object 级）。
+  // 公开代理入口只允许 GET/HEAD：两层合并（isolate 级 → Durable Object 级）。
   // TODO: 当前只有 leader 的请求上下文会继续进入 DO / upstream。
   // 也就是说 follower 请求虽然能拿到响应，但在日志里找不到自己对应的
   // DO / upstream 链路；后面如果要增强追踪，再把 external requestId 和

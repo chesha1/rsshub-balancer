@@ -4,14 +4,14 @@
 
 ## 字段与 label
 
-当前只保留 `route_request` 作为主指标：每个进入代理/路由处理的入口请求完成后写入一条数据点。边缘层直接处理的 `OPTIONS` 请求不会进入上游转发，也不会写入 `route_request`。所有数据点都写入同一个全局索引，`index1` 固定为 `global`；用 `double1` 记录事件计数，固定写入 `1`；用 `double2` 记录这次入口请求耗时，单位是毫秒。
+当前只保留 `route_request` 作为主指标：每个进入代理/路由处理的 `GET` / `HEAD` 入口请求完成后写入一条数据点。公开代理入口被边缘拒绝的方法不会进入上游转发，也不会写入 `route_request`。所有数据点都写入同一个全局索引，`index1` 固定为 `global`；用 `double1` 记录事件计数，固定写入 `1`；用 `double2` 记录这次入口请求耗时，单位是毫秒。
 
 | 字段 | label | 当前取值 | 说明 |
 | --- | --- | --- | --- |
 | `blob1` | `metric` | `route_request` | 指标名称 |
 | `blob2` | `layer` | `edge` | 入口请求层级，固定为 `edge` |
 | `blob3` | `role` | `none` | 保留旧字段位置，当前固定为 `none` |
-| `blob4` | `method` | 实际 HTTP method，例如 `GET` / `HEAD` / `POST` | 入口请求方法 |
+| `blob4` | `method` | 实际 HTTP method，例如 `GET` / `HEAD` | 入口请求方法 |
 | `blob5` | `outcome` | `direct_upstream` / `isolate_coalesced` / `do_coalesced` | 请求最终处理方式 |
 | `blob6` | `status` | 响应状态码字符串，例如 `200` / `404` / `503` | 最终返回或被复用响应的 HTTP 状态码 |
 | `blob7` | `upstream` | 实际 upstream URL / `none` | 仅 `direct_upstream` 记录最终触达的 upstream；其它 outcome 为 `none` |
@@ -26,7 +26,7 @@
 
 | `outcome` | `upstream` | 记录时机 |
 | --- | --- | --- |
-| `direct_upstream` | 实际 upstream URL | 这次入口请求真实打到了上游，包括非 GET/HEAD、DO 抽样未命中、DO RPC 失败降级、DO leader |
+| `direct_upstream` | 实际 upstream URL | 这次 GET/HEAD 入口请求真实打到了上游，包括 DO 抽样未命中、DO RPC 失败降级、DO leader |
 | `isolate_coalesced` | `none` | GET/HEAD 在当前 Worker isolate 内成为 follower，复用了同 isolate 的进行中结果 |
 | `do_coalesced` | `none` | GET/HEAD 进入 Durable Object 后成为 follower，复用了 DO 内的进行中结果 |
 
@@ -52,7 +52,7 @@ ORDER BY request_total DESC
 
 ## 最近 24 小时请求 Method 分布
 
-进入代理/路由处理的入口请求会用 `route_request` 指标记录 method，存在 `blob4`。边缘层直接响应的 `OPTIONS` 不再计入这里的 method 分布。这个 SQL 用来查看当前时间窗口内进入代理处理过哪些 HTTP methods，以及每种 method 的近似请求数。
+进入代理/路由处理的 `GET` / `HEAD` 入口请求会用 `route_request` 指标记录 method，存在 `blob4`。公开代理入口被边缘拒绝的方法不再计入这里的 method 分布。这个 SQL 用来查看当前时间窗口内进入代理处理过哪些 HTTP methods，以及每种 method 的近似请求数。
 
 ```sql
 SELECT

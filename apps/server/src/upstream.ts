@@ -240,11 +240,6 @@ export async function fetchFromUpstream(
       }
     }
 
-    // 非幂等请求需要缓冲 body 以支持顺序重试；没有健康候选时不再提前消费 body。
-    const body =
-      method !== 'GET' && method !== 'HEAD'
-        ? await tracedRequest.arrayBuffer()
-        : undefined
     const orderedUpstreams = shuffle(healthyUpstreams)
 
     prepareDurationMs = Date.now() - startedAt
@@ -309,7 +304,6 @@ export async function fetchFromUpstream(
           method,
           redirect: 'manual',
           headers,
-          body,
           signal: AbortSignal.timeout(15000),
         })
         if (res.status >= 200 && res.status < 400) {
