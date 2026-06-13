@@ -2,6 +2,7 @@ import { honoLogger } from '@logtape/hono'
 import { Hono } from 'hono'
 import { requestId } from 'hono/request-id'
 import { v7 as uuidv7 } from 'uuid'
+import { config } from './config'
 import {
   errorProps,
   getRequestLogContext,
@@ -30,6 +31,9 @@ const inflight = new Map<string, Promise<CoalescedRequestResult>>()
 
 // 临时降低 Durable Object 参与比例，先保留少量样本观察 Redis timeout 变化。
 const DO_SAMPLE_RATE = 0.01
+
+// 临时把一部分公开代理请求前置直转 fallback，用代码常量控制月底账单保护比例。
+const DIRECT_FALLBACK_RATE = 0.3
 
 // 这些路径会频繁被探测或访问，保留路由行为但默认不写入口访问日志。
 const quietAccessLogExactPaths = new Set([
@@ -176,8 +180,31 @@ app.all('/*', async (c) => {
 
   const url = new URL(c.req.url)
   const requestPath = url.pathname + url.search
-  const coalesceKey = `${method} ${requestPath}`
   const request = c.req.raw
+
+  // 这是为了临时节约本月账单的前置旁路，月底压力解除后应删除或降到 0。
+  // 这里不是安全随机，只用最低成本做请求级临时分流，尽量避开后面的 JS 调度链路。
+  if (Math.random() < DIRECT_FALLBACK_RATE) {
+    const fallbackUpstream = config.fallbackUpstreams[0]
+    try {
+      return await fetch(fallbackUpstream + requestPath, {
+        method,
+        redirect: 'manual',
+        headers: request.headers,
+        signal: AbortSignal.timeout(15000),
+      })
+    } catch {
+      return new Response(
+        method === 'HEAD' ? null : 'Fallback upstream failed',
+        {
+          status: 502,
+          headers: { 'content-type': 'text/plain; charset=UTF-8' },
+        },
+      )
+    }
+  }
+
+  const coalesceKey = `${method} ${requestPath}`
   const requestCountry = getRequestCountry(request)
   const requestColo = getRequestColo(request)
   const startedAt = Date.now()
