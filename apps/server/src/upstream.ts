@@ -1,10 +1,5 @@
 import { config } from './config'
-import {
-  errorProps,
-  upstreamLogger,
-  withRequestId,
-  withResponseRequestId,
-} from './log'
+import { errorProps, upstreamLogger, withRequestId } from './log'
 import type { StateStore } from './store'
 import { shuffle, trimSlash } from './utils'
 
@@ -230,12 +225,10 @@ export async function fetchFromUpstream(
         ...logContext,
       })
       return {
-        response: withResponseRequestId(
-          new Response('All upstreams failed to handle this request', {
-            status: 502,
-            headers: { 'content-type': 'text/plain; charset=UTF-8' },
-          }),
-        ),
+        response: new Response('All upstreams failed to handle this request', {
+          status: 502,
+          headers: { 'content-type': 'text/plain; charset=UTF-8' },
+        }),
         upstream: finalUpstreamHost,
       }
     }
@@ -334,7 +327,7 @@ export async function fetchFromUpstream(
             ...logContext,
           })
           return {
-            response: withResponseRequestId(res),
+            response: res,
             upstream: finalUpstreamHost,
           }
         }
@@ -376,12 +369,10 @@ export async function fetchFromUpstream(
       ...logContext,
     })
     return {
-      response: withResponseRequestId(
-        new Response('All upstreams failed to handle this request', {
-          status: 502,
-          headers: { 'content-type': 'text/plain; charset=UTF-8' },
-        }),
-      ),
+      response: new Response('All upstreams failed to handle this request', {
+        status: 502,
+        headers: { 'content-type': 'text/plain; charset=UTF-8' },
+      }),
       upstream: finalUpstreamHost,
     }
   } catch (e) {
@@ -418,12 +409,10 @@ export async function fetchFromUpstream(
       ...errorProps(e),
     })
     return {
-      response: withResponseRequestId(
-        new Response('Internal error', {
-          status: 502,
-          headers: { 'content-type': 'text/plain; charset=UTF-8' },
-        }),
-      ),
+      response: new Response('Internal error', {
+        status: 502,
+        headers: { 'content-type': 'text/plain; charset=UTF-8' },
+      }),
       upstream: finalUpstreamHost,
     }
   }

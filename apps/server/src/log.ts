@@ -213,22 +213,6 @@ export function withRequestId(
   return new Request(request, { headers })
 }
 
-// 给原生 Response 显式补上 X-Request-Id，保证直接返回 Response 的路径也能把请求 ID 回给客户端。
-export function withResponseRequestId(
-  response: Response,
-  requestId = getCurrentRequestId(),
-): Response {
-  if (!requestId) return response
-
-  const headers = new Headers(response.headers)
-  headers.set(REQUEST_ID_HEADER, requestId)
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  })
-}
-
 export function getRequestId(request: Request): string | null {
   return request.headers.get(REQUEST_ID_HEADER)
 }

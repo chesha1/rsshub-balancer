@@ -9,7 +9,6 @@ import {
   httpLogger,
   withRequestId,
   withRequestLogContext,
-  withResponseRequestId,
 } from './log'
 import {
   getRequestColo,
@@ -157,7 +156,7 @@ app.get('/api/route/status', async (c) => {
         throw new Error(`${res.status}`)
       }),
     )
-    return withResponseRequestId(response)
+    return response
   } catch {
     return c.json({ cached: false, lastBuildDate: null }, 404)
   }
@@ -292,9 +291,7 @@ app.all('/*', async (c) => {
     status: snapshot.status,
     durationMs,
   })
-  return withResponseRequestId(
-    toResponse(snapshot, { includeBody: method !== 'HEAD' }),
-  )
+  return toResponse(snapshot, { includeBody: method !== 'HEAD' })
 })
 
 export default {
