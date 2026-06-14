@@ -15,12 +15,6 @@
     // 可选值：redis 直连外部 Redis / Aiven Valkey；redis-http 通过 HTTP proxy；kv 回滚到 Cloudflare KV。
     "STATE_STORE_BACKEND": "redis"
   },
-  "routes": [
-    {
-      "pattern": "rsshub-balancer.virworks.moe",
-      "custom_domain": true
-    }
-  ],
   "kv_namespaces": [
     {
       "binding": "KV",
