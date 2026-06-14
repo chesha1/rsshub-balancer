@@ -34,18 +34,14 @@
       "dataset": "rsshub_balancer_metrics"
     }
   ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "DO",
-        "class_name": "RequestCoalescer"
-      }
-    ]
-  },
   "migrations": [
     {
       "tag": "v1-add-request-coalescer",
       "new_classes": ["RequestCoalescer"]
+    },
+    {
+      "tag": "v2-remove-request-coalescer",
+      "deleted_classes": ["RequestCoalescer"]
     }
   ],
   "observability": {

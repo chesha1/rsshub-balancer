@@ -36,11 +36,7 @@ SELECT
 FROM rsshub_balancer_metrics
 WHERE timestamp > NOW() - INTERVAL '1' DAY
   AND blob1 = 'route_request'
-  AND blob5 IN (
-    'direct_upstream',
-    'isolate_coalesced',
-    'do_coalesced'
-  )
+  AND blob5 = 'direct_upstream'
 GROUP BY country, edge_colo, outcome, upstream
 ORDER BY request_total DESC
 FORMAT JSON

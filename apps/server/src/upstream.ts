@@ -9,12 +9,6 @@ type UpstreamAttemptKind = 'forward' | 'fallback'
 
 type UpstreamPhase = 'prepare' | 'cache_probe' | 'fetch'
 
-type UpstreamLogContext = {
-  degradedToDirect?: boolean
-  degradeReason?: string
-  degradeError?: Record<string, unknown>
-}
-
 type GetUpstreamsOptions = {
   waitUntil?: (promise: Promise<unknown>) => void
 }
@@ -171,7 +165,6 @@ export async function fetchFromUpstream(
   request: Request,
   store: StateStore,
   waitUntil: (p: Promise<unknown>) => void,
-  logContext: UpstreamLogContext = {},
 ): Promise<UpstreamFetchResult> {
   const tracedRequest = withRequestId(request)
   const startedAt = Date.now()
@@ -222,7 +215,6 @@ export async function fetchFromUpstream(
         upstreamCount: upstreams.length,
         healthyUpstreamCount,
         failedUpstreamCount,
-        ...logContext,
       })
       return {
         response: new Response('All upstreams failed to handle this request', {
@@ -324,7 +316,6 @@ export async function fetchFromUpstream(
             selectedUpstreamHost,
             finalUpstreamHost,
             fallbackUsed: fallbackAttemptCount > 0,
-            ...logContext,
           })
           return {
             response: res,
@@ -366,7 +357,6 @@ export async function fetchFromUpstream(
       selectedUpstreamHost,
       finalUpstreamHost,
       fallbackUsed: fallbackAttemptCount > 0,
-      ...logContext,
     })
     return {
       response: new Response('All upstreams failed to handle this request', {
@@ -404,7 +394,6 @@ export async function fetchFromUpstream(
       finalAttemptKind,
       selectedUpstreamHost,
       finalUpstreamHost,
-      ...logContext,
       fallbackUsed: fallbackAttemptCount > 0,
       ...errorProps(e),
     })

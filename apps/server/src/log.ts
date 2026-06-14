@@ -124,7 +124,6 @@ const rootLogger = getLogger(['rsshub-balancer'])
 // 按模块拆分类别，方便后续在 Cloudflare 里按 category 过滤。
 export const httpLogger = rootLogger.getChild('http')
 export const upstreamLogger = rootLogger.getChild('upstream')
-export const coalescerLogger = rootLogger.getChild('coalescer')
 export const metricsLogger = rootLogger.getChild('metrics')
 export const cronLogger = rootLogger.getChild('cron')
 export const storeLogger = rootLogger.getChild('store')

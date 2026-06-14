@@ -3,13 +3,7 @@ import { Hono } from 'hono'
 import { requestId } from 'hono/request-id'
 import { v7 as uuidv7 } from 'uuid'
 import { config } from './config'
-import {
-  errorProps,
-  getRequestLogContext,
-  httpLogger,
-  withRequestId,
-  withRequestLogContext,
-} from './log'
+import { getRequestLogContext, withRequestLogContext } from './log'
 import {
   getRequestColo,
   getRequestCountry,
@@ -18,18 +12,8 @@ import {
 import internalRoutes from './routes/internal'
 import { scheduled } from './scheduled'
 import { createStateStore } from './store'
-import type { AppEnv, CoalescedRequestResult } from './types'
+import type { AppEnv } from './types'
 import { fetchFromUpstream, getUpstreams } from './upstream'
-import { fromResponse, toResponse } from './utils'
-
-export { RequestCoalescer } from './coalescer'
-
-// isolate 级请求合并：key 为 method + requestPath，value 为正在进行的上游解析 promise。
-// 同一 isolate 内对同一路径同方法的并发 GET/HEAD 请求共享同一个 promise，leader 完成后条目自动清除。
-const inflight = new Map<string, Promise<CoalescedRequestResult>>()
-
-// 临时降低 Durable Object 参与比例，先保留少量样本观察 Redis timeout 变化。
-const DO_SAMPLE_RATE = 0.01
 
 // 临时把一部分公开代理请求前置直转 fallback，用代码常量控制月底账单保护比例。
 const DIRECT_FALLBACK_RATE = 0.3
@@ -203,95 +187,24 @@ app.all('/*', async (c) => {
     }
   }
 
-  const coalesceKey = `${method} ${requestPath}`
   const requestCountry = getRequestCountry(request)
   const requestColo = getRequestColo(request)
   const startedAt = Date.now()
   const stateStore = createStateStore(c.env)
-
-  // 公开代理入口只允许 GET/HEAD：两层合并（isolate 级 → Durable Object 级）。
-  // TODO: 当前只有 leader 的请求上下文会继续进入 DO / upstream。
-  // 也就是说 follower 请求虽然能拿到响应，但在日志里找不到自己对应的
-  // DO / upstream 链路；后面如果要增强追踪，再把 external requestId 和
-  // shared fetch/coalesce id 拆开建模。
-  let promise = inflight.get(coalesceKey)
-  let coalesceRole: 'isolate-leader' | 'isolate-follower'
-  if (promise) {
-    coalesceRole = 'isolate-follower'
-    httpLogger.debug('request joined an inflight isolate request', {
-      event: 'coalesce.join',
-      coalesceRole,
-    })
-  } else {
-    coalesceRole = 'isolate-leader'
-    httpLogger.debug('request is leading an isolate coalesced fetch', {
-      event: 'coalesce.join',
-      coalesceRole,
-    })
-    promise = (async (): Promise<CoalescedRequestResult> => {
-      try {
-        let directReason: 'do_sampled_out' | 'do_rpc_failed' = 'do_sampled_out'
-        let degradeError: Record<string, unknown> | undefined
-
-        // 只让少量 isolate leader 继续进入 DO，用最小改动降低 DO 内 Redis 访问压力。
-        if (Math.random() < DO_SAMPLE_RATE) {
-          try {
-            const id = c.env.DO.idFromName(coalesceKey)
-            const stub = c.env.DO.get(id)
-            return await stub.coalesce(withRequestId(request))
-          } catch (e) {
-            directReason = 'do_rpc_failed'
-            degradeError = errorProps(e)
-          }
-        }
-
-        const result = await fetchFromUpstream(
-          request,
-          stateStore,
-          // 降级直连上游时，仍然沿用同一个 waitUntil 提交后台任务。
-          (p) => c.executionCtx.waitUntil(p),
-          {
-            degradedToDirect: true,
-            degradeReason: directReason,
-            ...(degradeError ? { degradeError } : {}),
-          },
-        )
-        const snapshot = await fromResponse(result.response)
-        return {
-          snapshot,
-          outcome: 'direct_upstream',
-          upstream: result.upstream,
-        }
-      } finally {
-        inflight.delete(coalesceKey)
-      }
-    })()
-    inflight.set(coalesceKey, promise)
-  }
-
-  const result = await promise
-  const snapshot = result.snapshot
+  const result = await fetchFromUpstream(request, stateStore, (p) =>
+    c.executionCtx.waitUntil(p),
+  )
   const durationMs = Date.now() - startedAt
-  const routeRequestOutcome =
-    coalesceRole === 'isolate-follower' ? 'isolate_coalesced' : result.outcome
   recordRouteRequestMetric(c.env.METRICS, {
     method,
-    status: snapshot.status,
+    status: result.response.status,
     durationMs,
-    outcome: routeRequestOutcome,
-    upstream:
-      routeRequestOutcome === 'direct_upstream' ? result.upstream : undefined,
+    outcome: 'direct_upstream',
+    upstream: result.upstream,
     country: requestCountry,
     edgeColo: requestColo,
   })
-  httpLogger.info('isolate coalescing completed', {
-    event: 'coalesce.completed',
-    coalesceRole,
-    routeRequestOutcome,
-    status: snapshot.status,
-    durationMs,
-  })
-  return toResponse(snapshot, { includeBody: method !== 'HEAD' })
+  return result.response
 })
 
 export default {
