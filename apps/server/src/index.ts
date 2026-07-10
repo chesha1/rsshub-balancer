@@ -16,7 +16,7 @@ import type { AppEnv } from './types'
 import { fetchFromUpstream, getUpstreams } from './upstream'
 
 // 临时把一部分公开代理请求前置直转 fallback，用代码常量控制月底账单保护比例。
-const DIRECT_FALLBACK_RATE = 0.3
+const DIRECT_FALLBACK_RATE = 0.5
 
 // 这些路径会频繁被探测或访问，保留路由行为但默认不写入口访问日志。
 const quietAccessLogExactPaths = new Set([
