@@ -14,6 +14,11 @@ import { scheduled } from './scheduled'
 import { createStateStore } from './store'
 import type { AppEnv } from './types'
 import { fetchFromUpstream, getUpstreams } from './upstream'
+import {
+  WORKERS_CACHE_BYPASS,
+  WORKERS_CACHE_CONTROL_HEADER,
+  withPublicProxyCachePolicy,
+} from './workers-cache'
 
 // 临时把一部分公开代理请求前置直转 fallback，用代码常量控制月底账单保护比例。
 const DIRECT_FALLBACK_RATE = 0.5
@@ -58,6 +63,16 @@ function shouldSkipAccessLog(path: string) {
 }
 
 const app = new Hono<AppEnv>()
+
+// 可观测性注意：Workers Cache HIT 会在 Worker 执行前直接返回，不会进入下方访问日志和 Analytics Engine 指标。
+// 因此首页最近 24 小时数据只反映 MISS、BYPASS 和刷新等实际执行请求；总流量与命中情况以 Cloudflare 平台侧缓存状态为准。
+// Workers Cache 会对缺少缓存头的 200/404 响应应用启发式 TTL；未明确放行的路由统一禁止写入。
+app.use(async (c, next) => {
+  await next()
+  if (!c.res.headers.has(WORKERS_CACHE_CONTROL_HEADER)) {
+    c.header(WORKERS_CACHE_CONTROL_HEADER, WORKERS_CACHE_BYPASS)
+  }
+})
 
 // 为每个外部请求生成/复用一个 X-Request-Id，作为整条链路的业务关联键。
 app.use(
@@ -170,12 +185,13 @@ app.all('/*', async (c) => {
   if (Math.random() < DIRECT_FALLBACK_RATE) {
     const fallbackUpstream = config.fallbackUpstreams[0]
     try {
-      return await fetch(fallbackUpstream + requestPath, {
+      const response = await fetch(fallbackUpstream + requestPath, {
         method,
         redirect: 'manual',
         headers: request.headers,
         signal: AbortSignal.timeout(15000),
       })
+      return withPublicProxyCachePolicy(request, response)
     } catch {
       return new Response(
         method === 'HEAD' ? null : 'Fallback upstream failed',
@@ -204,7 +220,7 @@ app.all('/*', async (c) => {
     country: requestCountry,
     edgeColo: requestColo,
   })
-  return result.response
+  return withPublicProxyCachePolicy(request, result.response)
 })
 
 export default {
