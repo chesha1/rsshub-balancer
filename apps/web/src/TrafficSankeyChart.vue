@@ -75,6 +75,10 @@ use([CanvasRenderer, SankeyChart, TooltipComponent])
 
 // 使用 D3 维护的分类调色板，避免在图表配置里手写和维护大量颜色。
 const sankeyColorPalette = [...schemeTableau10, ...schemeSet3]
+const sankeyMinimumChartHeight = 360
+const sankeyNodeGap = 16
+const sankeyNodeSlotHeight = 22
+const sankeyVerticalPadding = 24
 
 // 给每个维度节点加命名空间，避免不同列中相同文本被 ECharts 合并。
 function createNodeName(column: TrafficSankeyColumn, value: string) {
@@ -188,6 +192,17 @@ function aggregateSankeyRows(
   }
 }
 
+// 统计节点最多的深度，让画布高度始终能容纳最拥挤的一列标签。
+function getMaximumNodeCountByDepth(nodeDepths: ReadonlyMap<string, number>) {
+  const nodeCountsByDepth = new Map<number, number>()
+
+  for (const depth of nodeDepths.values()) {
+    nodeCountsByDepth.set(depth, (nodeCountsByDepth.get(depth) ?? 0) + 1)
+  }
+
+  return Math.max(0, ...nodeCountsByDepth.values())
+}
+
 // 格式化请求数，尽量保留 Analytics Engine 聚合后的整数阅读体验。
 function formatRequestCount(value: number) {
   return Math.round(value).toLocaleString()
@@ -209,6 +224,21 @@ function formatTooltip(params: SankeyTooltipParams) {
 const chartData = computed(() =>
   aggregateSankeyRows(props.rows, visibleColumns.value),
 )
+
+// 按节点最多的一列动态增高画布，为每个 12px 标签保留稳定的垂直阅读空间。
+const chartHeight = computed(() =>
+  Math.max(
+    sankeyMinimumChartHeight,
+    getMaximumNodeCountByDepth(chartData.value.nodeDepths) *
+      sankeyNodeSlotHeight +
+      sankeyVerticalPadding,
+  ),
+)
+
+// 把计算结果作为内联高度交给 VChart，维度切换后 autoresize 会同步重排图表。
+const chartStyle = computed(() => ({
+  height: `${chartHeight.value}px`,
+}))
 
 const chartOption = computed(() => {
   const lastVisibleDepth = Math.max(0, visibleColumns.value.length - 1)
@@ -236,7 +266,7 @@ const chartOption = computed(() => {
         links: chartData.value.links,
         draggable: false,
         nodeAlign: 'justify',
-        nodeGap: 10,
+        nodeGap: sankeyNodeGap,
         nodeWidth: 14,
         top: 12,
         right: 16,
@@ -294,6 +324,7 @@ const chartOption = computed(() => {
       class="traffic-sankey-chart"
       :aria-label="chartAriaLabel"
       :option="chartOption"
+      :style="chartStyle"
       autoresize
       role="img"
     />
