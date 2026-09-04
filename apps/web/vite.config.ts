@@ -46,9 +46,11 @@ export default defineConfig({
     outDir: outputDir,
     emptyOutDir: true,
     assetsDir: '_assets',
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: splitVendorChunk,
+        codeSplitting: {
+          groups: [{ name: splitVendorChunk }],
+        },
       },
     },
   },

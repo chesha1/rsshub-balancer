@@ -13,14 +13,14 @@
     "cf-typegen": "NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run @rsshub-balancer/server:cf-typegen"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.16",
-    "@intlify/unplugin-vue-i18n": "^11.2.3",
-    "@types/node": "^25.9.2",
-    "@vitejs/plugin-vue": "^6.0.7",
-    "nx": "^22.7.5",
+    "@biomejs/biome": "2.5.12",
+    "@intlify/unplugin-vue-i18n": "^11.2.5",
+    "@types/node": "^25.9.5",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "nx": "^23.2.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.16",
-    "vue-tsc": "^3.3.3",
-    "wrangler": "^4.98.0"
+    "vite": "^8.2.2",
+    "vue-tsc": "^3.3.11",
+    "wrangler": "^4.129.0"
   }
 }
