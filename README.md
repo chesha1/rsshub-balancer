@@ -72,13 +72,17 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 ## 项目边界
 
-`rsshub-balancer` 只面向 RSSHub 场景做轻量 HTTP L7 路由、缓存感知转发、请求合并和简单失败兜底。它不会扩展成完整的软件负载均衡器，也不计划支持通用反向代理、L4 代理、复杂权重调度、主动健康检查控制面或长期连接管理。
+`rsshub-balancer` 只面向 RSSHub 场景做轻量 HTTP L7 路由、缓存感知转发、请求合并和简单失败兜底。它不会扩展成完整的软件负载均衡器，也不计划支持通用反向代理、L4 代理、复杂权重调度、通用主动健康检查控制面或长期连接管理。云下迁移另行设计了范围固定的探活与 Route 接管机制：探活 Worker 和两个手动 Actions 直接调用 Cloudflare API 切换 Route，不引入 DO。该机制尚未实施，见下方操作手册。
 
 更完整的边界说明见 [docs/capability-boundary.md](docs/capability-boundary.md)。
 
 ## 相关文档
 
 - [Metrics 查询](docs/metrics.md)
+- [云下桑基图数据回传 Analytics Engine 方案](docs/worker-migration/sankey-analytics-engine-ingestion-plan.md)
+- [云下 RSS 的 Zone Cache 方案](docs/worker-migration/zone-cache-plan.md)
+- [云下镜像发布与 Worker 临时接管方案](docs/worker-migration/origin-release-plan.md)
+- [迁移与故障接管操作手册](docs/worker-migration/migration-failover-runbook.md)
 - [状态存储后端](docs/state-store-backends.md)
 - [项目能力边界](docs/capability-boundary.md)
 - [云下完整 LB 分流计划](docs/origin-plane-split-plan.md)

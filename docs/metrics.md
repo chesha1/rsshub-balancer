@@ -2,9 +2,11 @@
 
 入口请求统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_metrics`。指标是近似统计，查询时需要使用 `_sample_interval` 修正采样。
 
+未来 Node/Hono 云下部署将继续把 Analytics Engine 作为首页桑基图的唯一数据源，由 Node 批量经过现有 Worker 写入；该方向尚未实施，见 [云下桑基图数据回传 Analytics Engine 方案](./worker-migration/sankey-analytics-engine-ingestion-plan.md)。
+
 ## 字段与 label
 
-当前只保留 `route_request` 作为主指标：每个进入代理/路由处理的 `GET` / `HEAD` 入口请求完成后写入一条数据点。公开代理入口被边缘拒绝的方法不会进入上游转发，也不会写入 `route_request`。所有数据点都写入同一个全局索引，`index1` 固定为 `global`；用 `double1` 记录事件计数，固定写入 `1`；用 `double2` 记录这次入口请求耗时，单位是毫秒。
+当前只保留 `route_request` 作为主指标：未命中 `DIRECT_FALLBACK_RATE`、进入完整选路处理的 `GET` / `HEAD` 请求在现有记录位置写入一条数据点。前置直转 fallback 分支仍然漏记，完整选路内部的 fallback 和重试继续记录最终结果；漏记修复已移入 [TODO](./todo.md#前置-fallback-请求的桑基图漏记)，不随本次云上云下迁移处理。公开代理入口被边缘拒绝的方法不会进入上游转发，也不会写入 `route_request`。所有数据点都写入同一个全局索引，`index1` 固定为 `global`；用 `double1` 记录事件计数，固定写入 `1`；用 `double2` 记录这次入口请求耗时，单位是毫秒。
 
 | 字段 | label | 当前取值 | 说明 |
 | --- | --- | --- | --- |
