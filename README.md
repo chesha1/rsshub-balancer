@@ -50,11 +50,13 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 - 当前使用中的 RSSHub 上游实例
 - 最近 24 小时请求来源国家/地区
-- Cloudflare 入口机房分布
+- Cloudflare 入口机房分布（迁移时移除）
 - 请求处理结果，包括直连上游、isolate 合并和 DO 合并
 - 真实触达的上游分布
 
 这些数据来自 Workers Analytics Engine，主要用于观察这个入口是否真的在复用缓存、减少重复请求，以及流量大致从哪里进入。
+
+迁移方案将首页桑基图简化为 `country -> outcome -> upstream`，指标、查询和页面调整尚未实施。字段约定见 [Metrics 查询](docs/metrics.md)，后续维度见 [丰富桑基图字段](docs/todo.md#丰富桑基图字段)。
 
 ### RSSHub 接口兼容范围
 
@@ -72,13 +74,15 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 ## 项目边界
 
-`rsshub-balancer` 只面向 RSSHub 场景做轻量 HTTP L7 路由、缓存感知转发、请求合并和简单失败兜底。它不会扩展成完整的软件负载均衡器，也不计划支持通用反向代理、L4 代理、复杂权重调度、主动健康检查控制面或长期连接管理。
+`rsshub-balancer` 只面向 RSSHub 场景做轻量 HTTP L7 路由、缓存感知转发、请求合并和简单失败兜底。它不会扩展成完整的软件负载均衡器，也不计划支持通用反向代理、L4 代理、复杂权重调度、通用主动健康检查控制面或长期连接管理。云下迁移先手动切换 Route，后续按需接入自动探活，不引入 DO；方案尚未实施。
 
 更完整的边界说明见 [docs/capability-boundary.md](docs/capability-boundary.md)。
 
 ## 相关文档
 
 - [Metrics 查询](docs/metrics.md)
+- [云下迁移方案](docs/worker-migration/README.md)
+- [迁移与故障接管操作手册](docs/worker-migration/migration-failover-runbook.md)
 - [状态存储后端](docs/state-store-backends.md)
 - [项目能力边界](docs/capability-boundary.md)
 - [云下完整 LB 分流计划](docs/origin-plane-split-plan.md)
