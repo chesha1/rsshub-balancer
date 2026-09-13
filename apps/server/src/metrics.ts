@@ -1,78 +1,71 @@
-import { errorProps, metricsLogger } from './log'
+import * as nodeMetrics from './adapters/metrics-node'
+import * as workerMetrics from './adapters/metrics-worker'
+import { metricsLogger } from './log'
+import type { MetricsBinding } from './metrics-schema'
 import type { RouteRequestOutcome } from './types'
 
+type MetricsRuntime = 'node' | 'worker'
+
+let runtime: MetricsRuntime | undefined
+
 type RecordRouteRequestMetricOptions = {
-  method?: string
-  status?: number
+  method: string
+  status: number
   durationMs?: number
   outcome: RouteRequestOutcome
   upstream?: string
   country?: string
-  edgeColo?: string
 }
 
-// 从 Cloudflare request metadata 中提取国家/地区代码，缺失或异常时统一归为 unknown。
+// 两个入口各调用一次完成初始化；Node 按环境配置启用后台上传，binding 不参与平台选择。
+export function configureMetrics(value: MetricsRuntime): void {
+  if (runtime && runtime !== value) {
+    throw new Error('Metrics runtime is already initialized')
+  }
+  if (runtime === value) return
+  if (value === 'node') {
+    nodeMetrics.startMetricsUpload(process.env.METRICS_INGEST_URL)
+  }
+  runtime = value
+}
+
+// 未初始化时报告配置错误，避免误用另一端的指标写入路径。
+function getRuntime(): MetricsRuntime {
+  if (!runtime) throw new Error('Metrics runtime is not initialized')
+  return runtime
+}
+
+// 地域优先取 Worker metadata，Node 直接读取 CF-IPCountry；缺失或为空时沿用 unknown。
 export function getRequestCountry(request: Request): string {
-  const cf = request.cf as Record<string, unknown> | undefined
-  const country = cf?.country
-  if (typeof country !== 'string') return 'unknown'
-
-  const normalizedCountry = country.trim()
-  return normalizedCountry.length > 0 ? normalizedCountry : 'unknown'
+  const cf = (request as Request & { cf?: { country?: string } }).cf
+  const country = cf?.country ?? request.headers.get('cf-ipcountry')
+  return country?.trim() || 'unknown'
 }
 
-// 从 Cloudflare request metadata 中提取入口机房代码，缺失或异常时统一归为 unknown。
-export function getRequestColo(request: Request): string {
-  const cf = request.cf as Record<string, unknown> | undefined
-  const colo = cf?.colo
-  if (typeof colo !== 'string') return 'unknown'
-
-  const normalizedColo = colo.trim()
-  return normalizedColo.length > 0 ? normalizedColo : 'unknown'
-}
-
-// 记录入口请求最终由哪种方式服务；写入失败只记录日志，不能影响主请求。
+// 统一补齐事件字段后按运行环境交给对应实现，指标故障不影响主请求。
 export function recordRouteRequestMetric(
-  metrics: AnalyticsEngineDataset,
+  metrics: MetricsBinding | undefined,
   options: RecordRouteRequestMetricOptions,
-) {
-  const method = options.method ?? 'none'
-  const status = options.status === undefined ? 'none' : String(options.status)
-  const durationMs = options.durationMs ?? 0
-  const upstream = options.upstream ?? 'none'
-  const country = options.country ?? 'none'
-  const edgeColo = options.edgeColo ?? 'none'
-
+): void {
+  const event = {
+    method: options.method,
+    status: options.status,
+    durationMs: options.durationMs ?? 0,
+    outcome: options.outcome,
+    upstream: options.upstream ?? 'none',
+    country: options.country ?? 'unknown',
+  }
   try {
-    metrics.writeDataPoint({
-      indexes: ['global'],
-      blobs: [
-        'route_request',
-        'edge',
-        'none',
-        method,
-        options.outcome,
-        status,
-        upstream,
-        country,
-        edgeColo,
-      ],
-      doubles: [1, durationMs],
-    })
-  } catch (e) {
-    metricsLogger.warn('analytics engine metric write failed', {
-      event: 'metrics.write',
+    if (getRuntime() === 'node') {
+      nodeMetrics.recordMetric(event)
+    } else if (metrics) {
+      workerMetrics.recordMetric(metrics, event, 'worker_failover')
+    }
+  } catch {
+    metricsLogger.warn('route request metric recording failed', {
+      event: 'metrics.record',
       outcome: 'failed',
-      metric: 'route_request',
-      layer: 'edge',
-      role: 'none',
-      method,
-      routeRequestOutcome: options.outcome,
-      status,
-      upstream,
-      country,
-      edgeColo,
-      ...errorProps(e),
+      droppedEventCount: 1,
     })
   }
 }

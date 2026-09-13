@@ -3,7 +3,9 @@
   "compilerOptions": {
     "composite": true,
     "noEmit": true,
-    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/server.tsbuildinfo"
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/server.tsbuildinfo",
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+  "include": ["src/**/*.ts", "worker-configuration.d.ts"],
+  "exclude": ["src/node.ts"]
 }

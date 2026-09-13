@@ -1,12 +1,10 @@
 import { Hono } from 'hono'
 import { errorProps, httpLogger } from '../log'
-import { createStateStore } from '../store'
 import type { AppContext, AppEnv, RouteRequestOutcome } from '../types'
 import { getUpstreams } from '../upstream'
 
 type CountryColoSankeyRow = {
   country: string
-  edgeColo: string
   outcome: RouteRequestOutcome
   upstream: string
   value: number
@@ -14,7 +12,6 @@ type CountryColoSankeyRow = {
 
 type CountryColoSankeySqlRow = {
   country: string
-  edge_colo: string
   outcome: RouteRequestOutcome
   upstream: string
   request_total: number
@@ -25,7 +22,6 @@ const TRAFFIC_SANKEY_WINDOW_HOURS = 24
 const COUNTRY_COLO_SANKEY_QUERY = `
 SELECT
   blob8 AS country,
-  blob9 AS edge_colo,
   blob5 AS outcome,
   if(
     blob5 = 'direct_upstream' AND blob7 != '' AND blob7 != 'none',
@@ -37,7 +33,7 @@ FROM rsshub_balancer_metrics
 WHERE timestamp > NOW() - INTERVAL '1' DAY
   AND blob1 = 'route_request'
   AND blob5 = 'direct_upstream'
-GROUP BY country, edge_colo, outcome, upstream
+GROUP BY country, outcome, upstream
 ORDER BY request_total DESC
 FORMAT JSON
 `
@@ -50,7 +46,6 @@ function parseCountryColoSankeyRows(payload: {
 }): CountryColoSankeyRow[] {
   return payload.data.map((row) => ({
     country: row.country,
-    edgeColo: row.edge_colo,
     outcome: row.outcome,
     upstream: row.upstream,
     value: row.request_total,
@@ -71,9 +66,7 @@ export async function handleInternalUpstreams(c: AppContext) {
   }
 
   try {
-    const upstreams = await getUpstreams(createStateStore(c.env), {
-      waitUntil: (p) => c.executionCtx.waitUntil(p),
-    })
+    const upstreams = await getUpstreams()
     return c.json({ upstreams })
   } catch (e) {
     httpLogger.warn('public upstream list request failed', {
@@ -85,7 +78,7 @@ export async function handleInternalUpstreams(c: AppContext) {
   }
 }
 
-// 查询最近 24 小时来源、入口机房、处理结果和真实上游的聚合分布，供首页桑基图展示。
+// 查询最近 24 小时来源、处理结果和真实上游的聚合分布，供首页桑基图展示。
 export async function handleCountryColoSankey(c: AppContext) {
   if (c.req.method !== 'GET') {
     return c.text('Method Not Allowed', 405, {
@@ -98,8 +91,8 @@ export async function handleCountryColoSankey(c: AppContext) {
     return c.json({ error: 'bad_request' }, 400)
   }
 
-  const accountId = c.env.CLOUDFLARE_ACCOUNT_ID?.trim()
-  const analyticsApiToken = c.env.CLOUDFLARE_ANALYTICS_API_TOKEN?.trim()
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim()
+  const analyticsApiToken = process.env.CLOUDFLARE_ANALYTICS_API_TOKEN?.trim()
   if (!accountId || !analyticsApiToken) {
     httpLogger.warn('analytics sankey request missing required secrets', {
       event: 'internal.metrics.country_colo_sankey',

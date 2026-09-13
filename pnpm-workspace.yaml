@@ -1,2 +1,8 @@
 packages:
   - apps/*
+
+# 此版本的组件代码直接导入 @vue/shared，但发布包未声明它。
+packageExtensions:
+  element-plus@2.14.5:
+    dependencies:
+      '@vue/shared': 3.5.42

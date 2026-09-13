@@ -1,21 +1,16 @@
 import { config } from './config'
 import { cronLogger, errorProps } from './log'
-import { createStateStore } from './store'
+import * as redis from './redis'
 import { cacheInstances, fetchRemoteInstances } from './upstream'
 import { trimSlash } from './utils'
 
-// 定时刷新远程 RSSHub 实例列表，健康检查通过后写入状态存储和本地缓存。
-export async function scheduled(
-  _event: ScheduledEvent,
-  env: CloudflareBindings,
-  _ctx: ExecutionContext,
-) {
+// 定时刷新远程 RSSHub 实例列表，健康检查通过后写入 Redis 和本地缓存。
+export async function scheduled(): Promise<void> {
   const startedAt = Date.now()
   let previous: string[] = []
-  const stateStore = createStateStore(env)
   try {
     try {
-      previous = (await stateStore.getInstances()) ?? []
+      previous = (await redis.getInstances()) ?? []
     } catch {}
     const remote = await fetchRemoteInstances()
     // 与 fallback 合并去重
@@ -53,7 +48,7 @@ export async function scheduled(
       })
       return
     }
-    await stateStore.setInstances(healthy)
+    await redis.setInstances(healthy)
     cacheInstances(healthy)
     cronLogger.info('scheduled refresh updated upstream instances', {
       event: 'cron.refresh',

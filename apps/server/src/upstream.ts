@@ -1,6 +1,7 @@
+import { proxy } from 'hono/proxy'
 import { config } from './config'
 import { errorProps, upstreamLogger, withRequestId } from './log'
-import type { StateStore } from './store'
+import * as redis from './redis'
 import { shuffle, trimSlash } from './utils'
 
 // `forward` 表示当前尝试正好命中了缓存探测选出的上游；
@@ -8,10 +9,6 @@ import { shuffle, trimSlash } from './utils'
 type UpstreamAttemptKind = 'forward' | 'fallback'
 
 type UpstreamPhase = 'prepare' | 'cache_probe' | 'fetch'
-
-type GetUpstreamsOptions = {
-  waitUntil?: (promise: Promise<unknown>) => void
-}
 
 type InstancesCache = {
   upstreams: string[]
@@ -26,10 +23,11 @@ export type UpstreamFetchResult = {
 let instancesCache: InstancesCache | undefined
 let instancesRefreshPromise: Promise<string[] | undefined> | undefined
 
-// 从 GitHub 获取远程实例列表
+// 从 GitHub 获取远程实例列表；同一个超时信号覆盖连接、响应头和完整正文读取。
 export async function fetchRemoteInstances(): Promise<string[]> {
   const res = await fetch(
     'https://raw.githubusercontent.com/RSSNext/rsshub-docs/main/.vitepress/theme/components/InstanceList.vue',
+    { signal: AbortSignal.timeout(15000) },
   )
   if (!res.ok) {
     throw new Error(`fetch instances failed: ${res.status}`)
@@ -55,39 +53,42 @@ export function cacheInstances(upstreams: readonly string[]): string[] {
   return [...cachedUpstreams]
 }
 
-// 从状态存储读取实例列表；为空时只在当前运行时降级使用 fallback，不写回远程状态存储。
-async function readInstancesFromStore(store: StateStore): Promise<string[]> {
-  const list = await store.getInstances()
+// 从 Redis 读取实例列表；为空时保留旧缓存，无缓存时仅使用 fallback，不写回 Redis。
+async function readInstancesFromRedis(): Promise<string[]> {
+  const list = await redis.getInstances()
   if (list && list.length > 0) return cacheInstances(list)
 
-  upstreamLogger.warn('state store instances empty; using fallback', {
-    event: 'state_store.instances_cache',
-    outcome: 'empty_using_fallback',
-    upstreamCount: config.fallbackUpstreams.length,
+  upstreamLogger.warn('redis instances empty; keeping current instances', {
+    event: 'redis.instances_cache',
+    outcome: instancesCache ? 'empty_using_cache' : 'empty_using_fallback',
+    upstreamCount:
+      instancesCache?.upstreams.length ?? config.fallbackUpstreams.length,
   })
 
-  return config.fallbackUpstreams
+  return [...(instancesCache?.upstreams ?? config.fallbackUpstreams)]
 }
 
-// 确保同一运行时只有一个 instances 后台刷新任务，刷新失败时保留旧缓存。
-function ensureInstancesRefresh(
-  store: StateStore,
-  currentCache: InstancesCache,
-): Promise<string[] | undefined> {
+// 同一进程或 isolate 的冷启动和过期读取共用一个刷新任务，失败时保留旧缓存。
+function ensureInstancesRefresh(): Promise<string[] | undefined> {
   if (instancesRefreshPromise) return instancesRefreshPromise
 
   const startedAt = Date.now()
   instancesRefreshPromise = (async () => {
     try {
-      return await readInstancesFromStore(store)
+      return await readInstancesFromRedis()
     } catch (e) {
       upstreamLogger.warn(
-        'state store instances refresh failed; using cached instances',
+        'redis instances read failed; keeping current instances',
         {
-          event: 'state_store.instances_cache',
-          outcome: 'refresh_failed_using_cache',
-          upstreamCount: currentCache.upstreams.length,
-          cacheAgeMs: Date.now() - currentCache.updatedAtMs,
+          event: 'redis.instances_cache',
+          outcome: instancesCache
+            ? 'refresh_failed_using_cache'
+            : 'miss_failed_using_fallback',
+          upstreamCount:
+            instancesCache?.upstreams.length ?? config.fallbackUpstreams.length,
+          cacheAgeMs: instancesCache
+            ? Date.now() - instancesCache.updatedAtMs
+            : undefined,
           refreshIntervalSeconds: config.instancesRefreshIntervalSeconds,
           refreshDurationMs: Date.now() - startedAt,
           ...errorProps(e),
@@ -102,69 +103,44 @@ function ensureInstancesRefresh(
   return instancesRefreshPromise
 }
 
-// 优先复用内存缓存；缓存超过刷新间隔时后台刷新，只有完全无缓存且读取失败时才 fallback。
-export async function getUpstreams(
-  store: StateStore,
-  options: GetUpstreamsOptions = {},
-): Promise<string[]> {
+// 600 秒内复用内存缓存；过期请求等待同一次 Redis 读取，完全无缓存时才 fallback。
+export async function getUpstreams(): Promise<string[]> {
   const nowMs = Date.now()
-  // 命中内存缓存时立即返回快照；若缓存过期，则通过 waitUntil 在后台刷新。
   if (instancesCache) {
     const cacheAgeMs = nowMs - instancesCache.updatedAtMs
     const refreshIntervalMs = config.instancesRefreshIntervalSeconds * 1000
-    if (cacheAgeMs >= refreshIntervalMs) {
-      const refreshPromise = ensureInstancesRefresh(store, instancesCache)
-      options.waitUntil?.(refreshPromise)
-    }
-    return [...instancesCache.upstreams]
+    if (cacheAgeMs < refreshIntervalMs) return [...instancesCache.upstreams]
   }
 
-  try {
-    return await readInstancesFromStore(store)
-  } catch (e) {
-    upstreamLogger.warn(
-      'state store instances cache miss failed; using fallback',
-      {
-        event: 'state_store.instances_cache',
-        outcome: 'miss_failed_using_fallback',
-        upstreamCount: config.fallbackUpstreams.length,
-        refreshIntervalSeconds: config.instancesRefreshIntervalSeconds,
-        ...errorProps(e),
-      },
-    )
-    return config.fallbackUpstreams
-  }
+  const refreshed = await ensureInstancesRefresh()
+  return [
+    ...(refreshed ?? instancesCache?.upstreams ?? config.fallbackUpstreams),
+  ]
 }
 
-// 在后台写入失败标记；写入异常只记录 warning，不能影响当前请求响应。
-async function markFailedUpstreamInBackground(
-  store: StateStore,
+// 在请求内等待失败标记写入；写入异常只记录 warning，不能影响当前请求响应。
+async function markFailedUpstream(
   upstream: string,
   pathname: string,
   ttlSeconds: number,
 ): Promise<void> {
   try {
-    await store.markUpstreamFailed(upstream, pathname, ttlSeconds)
+    await redis.markUpstreamFailed(upstream, pathname, ttlSeconds)
   } catch (e) {
-    upstreamLogger.warn(
-      'state store failed marker write failed; ignoring marker',
-      {
-        event: 'state_store.fail_marker',
-        outcome: 'ignored_write_failure',
-        upstream,
-        pathname,
-        ttlSeconds,
-        ...errorProps(e),
-      },
-    )
+    upstreamLogger.warn('redis failed marker write failed; ignoring marker', {
+      event: 'redis.fail_marker',
+      outcome: 'ignored_write_failure',
+      upstream,
+      pathname,
+      ttlSeconds,
+      ...errorProps(e),
+    })
   }
 }
 
 // 按优先级依次尝试上游实例，返回首个成功响应和最终触达的上游；全部失败时返回 502。
 export async function fetchFromUpstream(
   request: Request,
-  store: StateStore,
-  waitUntil: (p: Promise<unknown>) => void,
 ): Promise<UpstreamFetchResult> {
   const tracedRequest = withRequestId(request)
   const startedAt = Date.now()
@@ -186,16 +162,14 @@ export async function fetchFromUpstream(
   let cacheProbeStartedAt: number | undefined
   let fetchStartedAt: number | undefined
   try {
-    const upstreams = await getUpstreams(store, { waitUntil })
+    const upstreams = await getUpstreams()
     const url = new URL(tracedRequest.url)
     const requestPath = url.pathname + url.search
     const pathname = url.pathname
-    const method = tracedRequest.method
-    const headers = tracedRequest.headers
     // 并行读取所有上游对当前路由的失败记录；失败时按全健康处理。
     let failedUpstreams: Set<string>
     try {
-      failedUpstreams = await store.getFailedUpstreams(upstreams, pathname)
+      failedUpstreams = await redis.getFailedUpstreams(upstreams, pathname)
     } catch {
       failedUpstreams = new Set()
     }
@@ -285,10 +259,9 @@ export async function fetchFromUpstream(
         fallbackAttemptCount += 1
       }
       try {
-        const res = await fetch(upstream + requestPath, {
-          method,
+        const res = await proxy(upstream + requestPath, {
+          raw: tracedRequest,
           redirect: 'manual',
-          headers,
           signal: AbortSignal.timeout(15000),
         })
         if (res.status >= 200 && res.status < 400) {
@@ -323,17 +296,10 @@ export async function fetchFromUpstream(
           }
         }
       } catch {}
-      // 仅在当前路由尚未标记该上游失败时才写入，减少重复状态存储写入。
+      // 仅在当前路由尚未标记该上游失败时才写入，减少重复 Redis 写入。
       if (!failedUpstreams.has(upstream)) {
         failedUpstreams.add(upstream)
-        waitUntil(
-          markFailedUpstreamInBackground(
-            store,
-            upstream,
-            pathname,
-            config.failTtl,
-          ),
-        )
+        await markFailedUpstream(upstream, pathname, config.failTtl)
       }
     }
 

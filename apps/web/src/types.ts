@@ -12,7 +12,6 @@ const trafficSankeyOutcomeSchema = z.enum([
 
 export const trafficSankeyRowSchema = z.object({
   country: z.string(),
-  edgeColo: z.string(),
   outcome: trafficSankeyOutcomeSchema,
   upstream: z.string(),
   value: z.number(),

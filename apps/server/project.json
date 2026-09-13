@@ -7,44 +7,80 @@
   "targets": {
     "dev": {
       "executor": "nx:run-commands",
+      "continuous": true,
       "dependsOn": ["^build"],
       "options": {
-        "command": "wrangler dev --config apps/server/wrangler.jsonc --remote"
+        "command": "wrangler dev --remote",
+        "cwd": "apps/server"
       }
     },
-    "build": {
+    "dev:node": {
       "executor": "nx:run-commands",
-      "dependsOn": ["^build"],
-      "outputs": ["{workspaceRoot}/dist/apps/server"],
+      "continuous": true,
       "options": {
-        "command": "wrangler deploy --config apps/server/wrangler.jsonc --dry-run --outdir dist/apps/server"
+        "command": "tsx watch --env-file=.env src/node.ts",
+        "cwd": "apps/server"
+      }
+    },
+    "start:node": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "command": "node --env-file=.env ../../dist/apps/server/node/node.js",
+        "cwd": "apps/server"
       }
     },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "tsc -p apps/server/tsconfig.json --noEmit"
+        "commands": ["tsc --noEmit", "tsc -p tsconfig.node.json --noEmit"],
+        "parallel": true,
+        "cwd": "apps/server"
       }
     },
     "lint": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "biome check apps/server --files-ignore-unknown=true"
+        "command": "biome check . --files-ignore-unknown=true",
+        "cwd": "apps/server"
       }
     },
     "deploy": {
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],
       "options": {
-        "command": "wrangler deploy --config apps/server/wrangler.jsonc --minify"
+        "command": "wrangler deploy --minify",
+        "cwd": "apps/server"
       }
     },
     "cf-typegen": {
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/worker-configuration.d.ts"],
       "options": {
-        "command": "wrangler types --config apps/server/wrangler.jsonc --env-interface CloudflareBindings apps/server/worker-configuration.d.ts"
+        "command": "wrangler types --env-interface CloudflareBindings worker-configuration.d.ts",
+        "cwd": "apps/server"
       }
+    },
+    "build:worker": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "outputs": ["{workspaceRoot}/dist/apps/server/worker"],
+      "options": {
+        "command": "wrangler deploy --dry-run --outdir ../../dist/apps/server/worker",
+        "cwd": "apps/server"
+      }
+    },
+    "build:node": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/apps/server/node"],
+      "options": {
+        "command": "vite build",
+        "cwd": "apps/server"
+      }
+    },
+    "build": {
+      "executor": "nx:noop",
+      "dependsOn": ["build:worker", "build:node"]
     }
   }
 }

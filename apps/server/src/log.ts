@@ -11,12 +11,10 @@ import {
 // 这里暂时还是继续使用 `X-Request-Id`，优先保持实现简单、可读和兼容现有习惯。
 export const REQUEST_ID_HEADER = 'X-Request-Id'
 
-type RequestLogContext = Record<string, unknown> & {
-  requestId?: string
-  requestMethod?: string
-  requestPath?: string
-  cfColo?: string
-  cfCountry?: string
+type RequestLogContext = {
+  requestId: string
+  requestMethod: string
+  requestPath: string
 }
 
 type RuntimeWarning = Error & {
@@ -84,7 +82,7 @@ function formatMessage(parts: readonly unknown[]): string {
 // 1. `durationMs` 只表示当前日志事件范围内的总墙钟耗时；
 // 2. 分阶段耗时统一命名为 `{phase}DurationMs`；
 // 3. 未进入的阶段不写 `0`，而是直接省略对应字段。
-// Cloudflare 更适合直接消费结构化对象，因此这里把 LogTape record 展平成单个 JSON payload。
+// 两端使用同一份精简 JSON，方便直接查看 console 输出。
 function formatRecord(record: LogRecord): Record<string, unknown> {
   return {
     timestamp: new Date(record.timestamp).toISOString(),
@@ -97,12 +95,12 @@ function formatRecord(record: LogRecord): Record<string, unknown> {
 
 const logContextStorage = new AsyncLocalStorage<Record<string, unknown>>()
 
-// 整个 Worker 共用一套同步 console sink，避免每个模块各自重复初始化 logger。
+// 共用一套 console sink，只在实际输出警告或错误时序列化，不需要入口初始化。
 configureSync({
   contextLocalStorage: logContextStorage,
   sinks: {
     console: getConsoleSink({
-      formatter: (record) => [formatRecord(record)],
+      formatter: (record) => [JSON.stringify(formatRecord(record))],
     }),
   },
   loggers: [
@@ -126,25 +124,10 @@ export const httpLogger = rootLogger.getChild('http')
 export const upstreamLogger = rootLogger.getChild('upstream')
 export const metricsLogger = rootLogger.getChild('metrics')
 export const cronLogger = rootLogger.getChild('cron')
-export const storeLogger = rootLogger.getChild('store')
+export const redisLogger = rootLogger.getChild('redis')
 export const runtimeLogger = rootLogger.getChild('runtime')
 
 let runtimeWarningLoggerRegistered = false
-
-// 提取 Cloudflare 请求元信息，给 Redis 等跨模块日志补充区域和路由上下文。
-export function getRequestLogContext(request: Request): RequestLogContext {
-  const url = new URL(request.url)
-  const cf = request.cf as Record<string, unknown> | undefined
-  const context: RequestLogContext = {
-    requestMethod: request.method,
-    requestPath: url.pathname + url.search,
-  }
-
-  if (typeof cf?.colo === 'string') context.cfColo = cf.colo
-  if (typeof cf?.country === 'string') context.cfCountry = cf.country
-
-  return context
-}
 
 // 从 Node warning 对象中提取 EventEmitter 诊断字段，避免日志里直接展开复杂对象。
 function warningProps(warning: RuntimeWarning): Record<string, unknown> {
@@ -185,12 +168,10 @@ registerRuntimeWarningLogger()
 
 // 为当前异步流程绑定 Request ID，后续任意模块 logger 都会自动带上它。
 export function withRequestLogContext<T>(
-  context: string | RequestLogContext,
+  context: RequestLogContext,
   callback: () => T,
 ): T {
-  const normalizedContext =
-    typeof context === 'string' ? { requestId: context } : context
-  return withContext(normalizedContext, callback)
+  return withContext(context, callback)
 }
 
 // 读取当前异步请求上下文里的 Request ID，供 header 透传等非日志场景复用。

@@ -16,22 +16,21 @@
     "title": "Current Upstreams",
     "introBefore": "Instances below are automatically synced from the ",
     "docsLink": "official RSSHub documentation",
-    "introAfter": ", plus one self-maintained standby instance.",
+    "introAfter": ", plus one self-maintained standby instance. This is the candidate list used by the environment currently serving requests.",
     "loading": "Loading current upstreams…",
     "error": "The current upstream list is temporarily unavailable."
   },
   "trafficSankey": {
     "title": "Request Flow in the Last 24 Hours",
-    "summary": "Aggregated regular proxy requests by source country or region, Cloudflare ingress colo, handling outcome, and the upstream that was actually reached.",
+    "summary": "Aggregated regular proxy requests by source country or region, handling outcome, and the upstream that was actually reached.",
     "loading": "Loading traffic distribution for the last 24 hours…",
     "error": "Traffic distribution for the last 24 hours is temporarily unavailable.",
     "empty": "No traffic distribution data is available for the last 24 hours.",
-    "chartAria": "Sankey chart across request source countries or regions, Cloudflare edge colos, handling outcomes, and real upstreams.",
+    "chartAria": "Sankey chart across request source countries or regions, handling outcomes, and real upstreams.",
     "columnsAria": "Choose which dimension columns are shown in the homepage traffic Sankey chart.",
     "columnsLabel": "Columns",
     "columns": {
       "country": "Country/region",
-      "edgeColo": "Edge colo",
       "outcome": "Outcome",
       "upstream": "Real upstream"
     },

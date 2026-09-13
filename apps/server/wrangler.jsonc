@@ -14,10 +14,6 @@
     "not_found_handling": "none",
     "run_worker_first": ["/_internal/*", "/api/*", "/healthz", "/robots.txt"]
   },
-  "vars": {
-    // 可选值：redis 直连外部 Redis / Aiven Valkey；redis-http 通过 HTTP proxy；kv 回滚到 Cloudflare KV。
-    "STATE_STORE_BACKEND": "redis"
-  },
   "secrets": {
     "required": [
       "VALKEY_URL",
@@ -25,13 +21,6 @@
       "CLOUDFLARE_ANALYTICS_API_TOKEN"
     ]
   },
-  "kv_namespaces": [
-    {
-      "binding": "KV",
-      "id": "8038cf370b0648fd877bc505eeba8483",
-      "remote": true
-    }
-  ],
   "analytics_engine_datasets": [
     {
       "binding": "METRICS",

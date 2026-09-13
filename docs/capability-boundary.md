@@ -86,7 +86,7 @@
 
 当前的目标只是“尽量把请求转到已有缓存的 RSSHub 实例，并在失败时尝试下一个上游”。
 
-云下迁移先手动增删固定域名的 catch-all Route，后续按需接入自动探活，不引入 DO 或扩展上游调度策略；方案尚未实施，见[迁移与故障接管操作手册](worker-migration/migration-failover-runbook.md)。
+云下迁移先手动增删固定域名的 catch-all Route，后续按需接入自动探活，不引入 DO 或扩展上游调度策略；云下 Node 当前待 review，部署与切流进度见[实施状态](worker-migration/implementation-status.md)，操作见[迁移与故障接管操作手册](worker-migration/migration-failover-runbook.md)。
 
 ### 不把 Cloudflare KV 当数据库
 

@@ -1,6 +1,6 @@
 # 云下迁移方案
 
-方案待实施。为减少 Workers CPU Time 和费用，让已有服务器上的单进程 Node/Hono 承接日常 RSS，使用 Docker Compose + Traefik，保留 Cloudflare 橙云及现有 Worker 作为备用。首次迁移、故障接管和恢复均手动切换。
+此前 Worker 版本已部署并验证通过；当前 `hono/proxy` 调整仅完成本地验证，尚未重新部署 Worker。云下 Node 已完成本地实现，整体 review 仍待完成，尚未部署和切流，详见[实施状态](./implementation-status.md)。目标是减少 Workers CPU Time 和费用，让已有服务器上的单进程 Node/Hono 承接日常 RSS，使用 Docker Compose + Traefik，保留 Cloudflare 橙云及现有 Worker 作为备用。首次迁移、故障接管和恢复均手动切换。
 
 ## 接口归属
 
@@ -36,11 +36,12 @@ Route 匹配包含 query：用 Single Redirect 将带 query 的首页规范化�
 
 | 文档 | 内容 |
 | --- | --- |
+| [实施状态](./implementation-status.md) | 已实施功能、云上验证与 review 进度、本地运行及待部署工作 |
 | [共享运行时](./shared-code-runtime-plan.md) | 双入口、配置、Redis、Node 生命周期和代理差异 |
 | [指标回传](./sankey-analytics-engine-ingestion-plan.md) | ingest 协议、字段、查询与前端 |
 | [缓存](./zone-cache-plan.md) | Cache Rule、响应头和验证 |
 | [操作手册](./migration-failover-runbook.md) | 首次迁移、接管、发布、恢复和回滚 |
 
-Worker 保留前后端组合部署：`assets.directory=dist/apps/web`，构建依赖 Web；`not_found_handling=none`，缺失静态文件返回 404。`run_worker_first` 保留内部接口、API、健康检查及 `robots.txt` 的脚本优先设置，Hono catch-all 保留备用 RSS 后端；Node 只部署后端。这些资产设置与域名 Routes 分别管理。
+Worker 由 `index.ts` 进入共享的 `app.ts`，保留前后端组合部署：`assets.directory=dist/apps/web`，构建依赖 Web；`not_found_handling=none`，缺失静态文件返回 404。`run_worker_first` 保留内部接口、API、健康检查及 `robots.txt` 的脚本优先设置，Hono catch-all 保留备用 RSS 后端；Node 通过 `node.ts` 使用同一应用，只部署后端。这些资产设置与域名 Routes 分别管理。
 
 本次只处理迁移所需适配。现有选路、超时、fallback 等缺陷留在 [TODO](../todo.md)，不扩大为迁移前置改造；自动化在首次迁移后按需接入，见操作手册。

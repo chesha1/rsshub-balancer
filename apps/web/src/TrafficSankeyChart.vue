@@ -9,7 +9,7 @@ import { useI18n } from 'vue-i18n'
 import VChart from 'vue-echarts'
 import type { TrafficSankeyRow } from './types'
 
-type TrafficSankeyColumn = 'country' | 'edgeColo' | 'outcome' | 'upstream'
+type TrafficSankeyColumn = 'country' | 'outcome' | 'upstream'
 
 type SankeyLink = {
   source: string
@@ -46,7 +46,6 @@ const props = defineProps<{
 const { t, locale } = useI18n()
 const trafficSankeyColumns = [
   'country',
-  'edgeColo',
   'outcome',
   'upstream',
 ] as const satisfies readonly TrafficSankeyColumn[]

@@ -3,11 +3,16 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@logtape/hono": "^2.3.2",
+    "@hono/node-server": "^2.1.1",
     "@logtape/logtape": "^2.3.2",
     "@redis/client": "^6.2.1",
-    "@upstash/redis": "^1.38.3",
     "hono": "^4.13.5",
     "uuid": "^14.0.2"
+  },
+  "engines": {
+    "node": ">=26.8.2 <27"
+  },
+  "scripts": {
+    "start": "node ../../dist/apps/server/node/node.js"
   }
 }
