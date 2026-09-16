@@ -26,6 +26,19 @@ export type UpstreamFetchResult = {
 let instancesCache: InstancesCache | undefined
 let instancesRefreshPromise: Promise<string[] | undefined> | undefined
 
+// 按 hostname 排除本服务，协议、端口、大小写和域名末尾点不能绕过检查。
+export function excludeSelfUpstreams(upstreams: readonly string[]): string[] {
+  return upstreams.filter((upstream) => {
+    try {
+      const hostname = new URL(upstream).hostname.replace(/\.$/, '')
+      return hostname !== 'rsshub-balancer.virworks.moe'
+    } catch {
+      // 无效 URL 无法作为 HTTP 上游，避免它绕过候选检查进入探测。
+      return false
+    }
+  })
+}
+
 // 从 GitHub 获取远程实例列表
 export async function fetchRemoteInstances(): Promise<string[]> {
   const res = await fetch(
@@ -40,13 +53,17 @@ export async function fetchRemoteInstances(): Promise<string[]> {
   for (const m of matches) {
     urls.push(trimSlash(m[1]))
   }
-  return urls
+  return excludeSelfUpstreams(urls)
 }
 
 // 更新当前运行时的 instances 内存缓存，用于请求热路径复用最近一次非空列表。
 export function cacheInstances(upstreams: readonly string[]): string[] {
   const nowMs = Date.now()
-  const cachedUpstreams = [...upstreams]
+  const cachedUpstreams = excludeSelfUpstreams(upstreams)
+  // 存量快照也可能包含自身；过滤后为空时保留旧快照，无旧值则使用固定 fallback。
+  if (cachedUpstreams.length === 0) {
+    return [...(instancesCache?.upstreams ?? config.fallbackUpstreams)]
+  }
   instancesCache = {
     upstreams: cachedUpstreams,
     updatedAtMs: nowMs,

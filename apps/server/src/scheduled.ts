@@ -1,7 +1,11 @@
 import { config } from './config'
 import { cronLogger, errorProps } from './log'
 import { createStateStore } from './store'
-import { cacheInstances, fetchRemoteInstances } from './upstream'
+import {
+  cacheInstances,
+  excludeSelfUpstreams,
+  fetchRemoteInstances,
+} from './upstream'
 import { trimSlash } from './utils'
 
 // 定时刷新远程 RSSHub 实例列表，健康检查通过后写入状态存储和本地缓存。
@@ -18,10 +22,10 @@ export async function scheduled(
       previous = (await stateStore.getInstances()) ?? []
     } catch {}
     const remote = await fetchRemoteInstances()
-    // 与 fallback 合并去重
-    const merged = [
+    // 与 fallback 合并去重后先排除自身，避免健康检查本身触发递归。
+    const merged = excludeSelfUpstreams([
       ...new Set([...remote.map(trimSlash), ...config.fallbackUpstreams]),
-    ]
+    ])
     // 并行健康检查，只保留可用实例
     const checks = await Promise.all(
       merged.map(async (u) => {
