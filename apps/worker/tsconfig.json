@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "types": ["node"],
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/worker.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "vite.config.ts", "worker-configuration.d.ts"]
+}

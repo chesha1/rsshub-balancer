@@ -1,0 +1,10 @@
+{
+  "name": "@rsshub-balancer/worker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@redis/client": "^6.2.1",
+    "@rsshub-balancer/server-core": "workspace:*",
+    "hono": "^4.13.5"
+  }
+}

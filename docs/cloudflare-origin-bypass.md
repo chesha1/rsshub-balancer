@@ -69,7 +69,7 @@ rsshub-balancer.virworks.moe/bilibili/*  -> None / no script
 
 ## Wrangler 配置
 
-`apps/server/wrangler.jsonc` 不再声明 `routes`。原因是 `wrangler.jsonc` 只能表达“当前 Worker 绑定到哪些 route”，不能表达 `None / no script` route。
+`apps/worker/wrangler.jsonc` 不再声明 `routes`。原因是 `wrangler.jsonc` 只能表达“当前 Worker 绑定到哪些 route”，不能表达 `None / no script` route。
 
 如果保留 `routes`，后续 `pnpm deploy` 可能把 Cloudflare Dashboard 或 API 中配置的 Workers Routes 覆盖掉。因此 route 的来源应放在 Cloudflare Dashboard、Cloudflare API 脚本或 Terraform 等 zone 级配置里。
 

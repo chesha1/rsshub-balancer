@@ -1,29 +1,20 @@
 import { config } from './config'
 import { cronLogger, errorProps } from './log'
-import { createStateStore } from './store'
-import {
-  cacheInstances,
-  excludeSelfUpstreams,
-  fetchRemoteInstances,
-} from './upstream'
+import * as redis from './redis'
+import * as upstream from './upstream'
 import { trimSlash } from './utils'
 
-// 定时刷新远程 RSSHub 实例列表，健康检查通过后写入状态存储和本地缓存。
-export async function scheduled(
-  _event: ScheduledEvent,
-  env: CloudflareBindings,
-  _ctx: ExecutionContext,
-) {
+// 定时刷新远程 RSSHub 实例列表，健康检查通过后写入 Redis 和本地缓存。
+export async function scheduled(): Promise<void> {
   const startedAt = Date.now()
   let previous: string[] = []
-  const stateStore = createStateStore(env)
   try {
     try {
-      previous = (await stateStore.getInstances()) ?? []
+      previous = (await redis.getInstances()) ?? []
     } catch {}
-    const remote = await fetchRemoteInstances()
+    const remote = await upstream.fetchRemoteInstances()
     // 与 fallback 合并去重后先排除自身，避免健康检查本身触发递归。
-    const merged = excludeSelfUpstreams([
+    const merged = upstream.excludeSelfUpstreams([
       ...new Set([...remote.map(trimSlash), ...config.fallbackUpstreams]),
     ])
     // 并行健康检查，只保留可用实例
@@ -57,8 +48,8 @@ export async function scheduled(
       })
       return
     }
-    await stateStore.setInstances(healthy)
-    cacheInstances(healthy)
+    await redis.setInstances(healthy)
+    upstream.cacheInstances(healthy)
     cronLogger.info('scheduled refresh updated upstream instances', {
       event: 'cron.refresh',
       outcome: 'updated',

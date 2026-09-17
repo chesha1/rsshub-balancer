@@ -6,6 +6,7 @@
   "targets": {
     "dev": {
       "executor": "nx:run-commands",
+      "continuous": true,
       "options": {
         "command": "vite dev",
         "cwd": "apps/web"
@@ -15,19 +16,22 @@
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/apps/web"],
       "options": {
-        "command": "vite build --config apps/web/vite.config.ts"
+        "command": "vite build",
+        "cwd": "apps/web"
       }
     },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "vue-tsc -p apps/web/tsconfig.json --noEmit"
+        "command": "vue-tsc --noEmit",
+        "cwd": "apps/web"
       }
     },
     "lint": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "biome check apps/web --files-ignore-unknown=true"
+        "command": "biome check . --files-ignore-unknown=true",
+        "cwd": "apps/web"
       }
     }
   }

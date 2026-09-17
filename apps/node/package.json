@@ -1,0 +1,17 @@
+{
+  "name": "@rsshub-balancer/node",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@redis/client": "^6.2.1",
+    "@rsshub-balancer/server-core": "workspace:*",
+    "hono": "^4.13.5"
+  },
+  "engines": {
+    "node": ">=26.8.2 <27"
+  },
+  "scripts": {
+    "start": "node ../../dist/apps/node/node.js"
+  }
+}

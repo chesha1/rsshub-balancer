@@ -1,0 +1,11 @@
+**/node_modules
+**/.env
+**/.env.*
+**/.dev.vars*
+**/.wrangler
+.git
+.agents
+.codex
+.nx
+dist
+docs

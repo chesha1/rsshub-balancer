@@ -1,0 +1,57 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "@rsshub-balancer/worker",
+  "projectType": "application",
+  "sourceRoot": "apps/worker/src",
+  "targets": {
+    "dev": {
+      "continuous": true,
+      "dependsOn": ["^build"],
+      "options": {
+        "command": "vite dev",
+        "cwd": "apps/worker"
+      },
+      "executor": "nx:run-commands"
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["{workspaceRoot}/dist/apps/worker"],
+      "options": {
+        "command": "vite build",
+        "cwd": "apps/worker"
+      },
+      "executor": "nx:run-commands"
+    },
+    "deploy": {
+      "dependsOn": ["build"],
+      "options": {
+        "command": "wrangler deploy --config ../../dist/apps/worker/server/wrangler.json",
+        "cwd": "apps/worker"
+      },
+      "executor": "nx:run-commands"
+    },
+    "cf-typegen": {
+      "outputs": ["{projectRoot}/worker-configuration.d.ts"],
+      "options": {
+        "command": "wrangler types --config wrangler.jsonc --env-interface CloudflareBindings worker-configuration.d.ts",
+        "cwd": "apps/worker"
+      },
+      "executor": "nx:run-commands"
+    },
+    "typecheck": {
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "apps/worker"
+      },
+      "executor": "nx:run-commands"
+    },
+    "lint": {
+      "options": {
+        "command": "biome check . --files-ignore-unknown=true",
+        "cwd": "apps/worker"
+      },
+      "executor": "nx:run-commands"
+    }
+  },
+  "implicitDependencies": ["@rsshub-balancer/web"]
+}

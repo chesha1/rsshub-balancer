@@ -1,64 +1,46 @@
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import { errorProps, httpLogger } from '../log'
-import { createStateStore } from '../store'
-import type { AppContext, AppEnv, RouteRequestOutcome } from '../types'
-import { getUpstreams } from '../upstream'
+import * as upstream from '../upstream'
 
-type CountryColoSankeyRow = {
+type TrafficSankeyRow = {
   country: string
-  edgeColo: string
-  outcome: RouteRequestOutcome
   upstream: string
   value: number
 }
 
-type CountryColoSankeySqlRow = {
+type TrafficSankeySqlRow = {
   country: string
-  edge_colo: string
-  outcome: RouteRequestOutcome
   upstream: string
   request_total: number
 }
 
 const TRAFFIC_SANKEY_WINDOW_HOURS = 24
 
-const COUNTRY_COLO_SANKEY_QUERY = `
+const TRAFFIC_SANKEY_QUERY = `
 SELECT
-  blob8 AS country,
-  blob9 AS edge_colo,
-  blob5 AS outcome,
-  if(
-    blob5 = 'direct_upstream' AND blob7 != '' AND blob7 != 'none',
-    blob7,
-    'not_recorded'
-  ) AS upstream,
-  sum(_sample_interval * double1) AS request_total
-FROM rsshub_balancer_metrics
+  blob1 AS country,
+  blob2 AS upstream,
+  sum(_sample_interval) AS request_total
+FROM rsshub_balancer_request_flows
 WHERE timestamp > NOW() - INTERVAL '1' DAY
-  AND blob1 = 'route_request'
-  AND blob5 = 'direct_upstream'
-GROUP BY country, edge_colo, outcome, upstream
+GROUP BY country, upstream
 ORDER BY request_total DESC
 FORMAT JSON
 `
 
-const internalRoutes = new Hono<AppEnv>()
-
-// 将 SQL API 的列名转换成前端约定的 camelCase 字段。
-function parseCountryColoSankeyRows(payload: {
-  data: CountryColoSankeySqlRow[]
-}): CountryColoSankeyRow[] {
+// 将查询得到的请求数映射为首页图表的连线权重。
+function parseTrafficSankeyRows(payload: {
+  data: TrafficSankeySqlRow[]
+}): TrafficSankeyRow[] {
   return payload.data.map((row) => ({
     country: row.country,
-    edgeColo: row.edge_colo,
-    outcome: row.outcome,
     upstream: row.upstream,
     value: row.request_total,
   }))
 }
 
 // 从公开 UI 数据命名空间返回当前上游列表，响应中不暴露状态存储错误细节。
-export async function handleInternalUpstreams(c: AppContext) {
+async function handleInternalUpstreams(c: Context) {
   if (c.req.method !== 'GET') {
     return c.text('Method Not Allowed', 405, {
       Allow: 'GET',
@@ -71,9 +53,7 @@ export async function handleInternalUpstreams(c: AppContext) {
   }
 
   try {
-    const upstreams = await getUpstreams(createStateStore(c.env), {
-      waitUntil: (p) => c.executionCtx.waitUntil(p),
-    })
+    const upstreams = await upstream.getUpstreams()
     return c.json({ upstreams })
   } catch (e) {
     httpLogger.warn('public upstream list request failed', {
@@ -85,8 +65,8 @@ export async function handleInternalUpstreams(c: AppContext) {
   }
 }
 
-// 查询最近 24 小时来源、入口机房、处理结果和真实上游的聚合分布，供首页桑基图展示。
-export async function handleCountryColoSankey(c: AppContext) {
+// 查询最近 24 小时国家到上游的请求数量，供首页桑基图展示。
+async function handleTrafficSankey(c: Context) {
   if (c.req.method !== 'GET') {
     return c.text('Method Not Allowed', 405, {
       Allow: 'GET',
@@ -98,8 +78,8 @@ export async function handleCountryColoSankey(c: AppContext) {
     return c.json({ error: 'bad_request' }, 400)
   }
 
-  const accountId = c.env.CLOUDFLARE_ACCOUNT_ID?.trim()
-  const analyticsApiToken = c.env.CLOUDFLARE_ANALYTICS_API_TOKEN?.trim()
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim()
+  const analyticsApiToken = process.env.CLOUDFLARE_ANALYTICS_API_TOKEN?.trim()
   if (!accountId || !analyticsApiToken) {
     httpLogger.warn('analytics sankey request missing required secrets', {
       event: 'internal.metrics.country_colo_sankey',
@@ -120,7 +100,7 @@ export async function handleCountryColoSankey(c: AppContext) {
           Authorization: `Bearer ${analyticsApiToken}`,
           'Content-Type': 'text/plain;charset=UTF-8',
         },
-        body: COUNTRY_COLO_SANKEY_QUERY,
+        body: TRAFFIC_SANKEY_QUERY,
         signal: AbortSignal.timeout(10_000),
       },
     )
@@ -129,10 +109,10 @@ export async function handleCountryColoSankey(c: AppContext) {
     }
 
     const payload = (await response.json()) as {
-      data: CountryColoSankeySqlRow[]
+      data: TrafficSankeySqlRow[]
     }
     return c.json({
-      rows: parseCountryColoSankeyRows(payload),
+      rows: parseTrafficSankeyRows(payload),
       generatedAt: new Date().toISOString(),
       windowHours: TRAFFIC_SANKEY_WINDOW_HOURS,
     })
@@ -146,7 +126,7 @@ export async function handleCountryColoSankey(c: AppContext) {
   }
 }
 
+// 列表查询直接使用上游模块，与代理和当前进程或 isolate 的定时刷新共用缓存。
+export const internalRoutes = new Hono()
 internalRoutes.all('/upstreams', handleInternalUpstreams)
-internalRoutes.all('/metrics/country-colo-sankey', handleCountryColoSankey)
-
-export default internalRoutes
+internalRoutes.all('/metrics/country-colo-sankey', handleTrafficSankey)

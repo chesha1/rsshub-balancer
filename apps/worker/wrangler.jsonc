@@ -2,8 +2,8 @@
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "rsshub-balancer",
   "main": "src/index.ts",
-  "compatibility_date": "2026-03-06",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_date": "2026-09-17",
+  "compatibility_flags": ["nodejs_compat", "new_module_registry"],
   "cache": {
     "enabled": true
   },
@@ -14,10 +14,6 @@
     "not_found_handling": "none",
     "run_worker_first": ["/_internal/*", "/api/*", "/healthz", "/robots.txt"]
   },
-  "vars": {
-    // 可选值：redis 直连外部 Redis / Aiven Valkey；redis-http 通过 HTTP proxy；kv 回滚到 Cloudflare KV。
-    "STATE_STORE_BACKEND": "redis"
-  },
   "secrets": {
     "required": [
       "VALKEY_URL",
@@ -25,17 +21,10 @@
       "CLOUDFLARE_ANALYTICS_API_TOKEN"
     ]
   },
-  "kv_namespaces": [
-    {
-      "binding": "KV",
-      "id": "8038cf370b0648fd877bc505eeba8483",
-      "remote": true
-    }
-  ],
   "analytics_engine_datasets": [
     {
       "binding": "METRICS",
-      "dataset": "rsshub_balancer_metrics"
+      "dataset": "rsshub_balancer_request_flows"
     }
   ],
   "migrations": [

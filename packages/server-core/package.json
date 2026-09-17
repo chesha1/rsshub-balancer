@@ -1,0 +1,17 @@
+{
+  "name": "@rsshub-balancer/server-core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./log": "./src/log.ts",
+    "./redis": "./src/redis.ts",
+    "./metrics": "./src/metrics.ts",
+    "./metrics-schema": "./src/metrics-schema.ts"
+  },
+  "dependencies": {
+    "@logtape/logtape": "^2.3.2",
+    "hono": "^4.13.5",
+    "uuid": "^14.0.2"
+  }
+}
