@@ -1,0 +1,22 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "@rsshub-balancer/server-core",
+  "projectType": "library",
+  "sourceRoot": "packages/server-core/src",
+  "targets": {
+    "typecheck": {
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "packages/server-core"
+      },
+      "executor": "nx:run-commands"
+    },
+    "lint": {
+      "options": {
+        "command": "biome check . --files-ignore-unknown=true",
+        "cwd": "packages/server-core"
+      },
+      "executor": "nx:run-commands"
+    }
+  }
+}

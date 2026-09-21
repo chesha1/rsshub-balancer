@@ -22,7 +22,7 @@ and not (
 - 边缘 TTL：`respect_origin`，有缓存头时遵循源站，没有时使用 Cloudflare 默认行为；浏览器 TTL 遵循源站，不添加状态码 TTL。
 - 缓存键保留完整 query string，关闭 Query String Sort，保留参数顺序。
 
-资格不保证存储；上述排除也不等于 bypass。上线前核对其他 Cache Rules、Page Rules 和 Cache Response Rules，避免强制缓存保留接口、覆盖 `no-store` 或忽略 query。[Cache Rules 设置](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/)
+资格不保证存储；上述排除也不等于 bypass。调整缓存配置时核对其他 Cache Rules、Page Rules 和 Cache Response Rules，避免强制缓存保留接口、覆盖 `no-store` 或忽略 query。[Cache Rules 设置](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/)
 
 ## 两端共享的响应头中间件
 
@@ -36,6 +36,8 @@ Cloudflare-CDN-Cache-Control: no-store
 Worker 单独挂载的 ingest 也设置双头。中间件只控制执行后的存储，不跳过已有缓存查找或清理旧条目。Cloudflare 专用头可能被平台消费，应用层核对双头，公开入口核对标准头和实际缓存行为。
 
 ## 验证与回滚
+
+本次迁移的线上验收已按用户 Dashboard 核验结果完成；以下清单供后续缓存配置变更与故障排查参考。
 
 - 测试规则覆盖普通 RSS，排除精确保留路径及目录子路径，不误伤 `/apix/feed`；带 query 的 `/healthz` 仍排除。
 - 同一 Feed 连续请求，结合 `CF-Cache-Status`、`Age` 与 Node/Traefik 日志确认 MISS/HIT；测试不同 query 及顺序、实时接口成功与错误响应的禁止缓存行为。正常 RSS 的 HIT/MISS 均不应进入 Worker。

@@ -9,7 +9,7 @@ import { useI18n } from 'vue-i18n'
 import VChart from 'vue-echarts'
 import type { TrafficSankeyRow } from './types'
 
-type TrafficSankeyColumn = 'country' | 'edgeColo' | 'outcome' | 'upstream'
+type TrafficSankeyColumn = 'country' | 'upstream'
 
 type SankeyLink = {
   source: string
@@ -46,16 +46,9 @@ const props = defineProps<{
 const { t, locale } = useI18n()
 const trafficSankeyColumns = [
   'country',
-  'edgeColo',
-  'outcome',
   'upstream',
 ] as const satisfies readonly TrafficSankeyColumn[]
 const selectedColumns = ref<TrafficSankeyColumn[]>([...trafficSankeyColumns])
-const outcomeTranslationKeys: Record<string, string> = {
-  direct_upstream: 'trafficSankey.outcomeValues.directUpstream',
-  do_coalesced: 'trafficSankey.outcomeValues.doCoalesced',
-  isolate_coalesced: 'trafficSankey.outcomeValues.isolateCoalesced',
-}
 const chartAriaLabel = computed(() => t('trafficSankey.chartAria'))
 const chartLocaleKey = computed(() => `traffic-sankey-${locale.value}`)
 const controlsAriaLabel = computed(() => t('trafficSankey.columnsAria'))
@@ -94,14 +87,9 @@ function parseNodeName(name: string) {
   }
 }
 
-// 把内部维度值转换成用户可读文本，处理结果维度用当前语言展示。
+// 把内部维度值转换成用户可读文本，未触达上游时使用当前语言的说明。
 function formatDimensionValue(column: TrafficSankeyColumn, value: string) {
-  if (column === 'outcome') {
-    const translationKey = outcomeTranslationKeys[value]
-    return translationKey ? t(translationKey) : value
-  }
-
-  if (column === 'upstream' && value === 'not_recorded') {
+  if (column === 'upstream' && value === 'none') {
     return t('trafficSankey.upstreamNotRecorded')
   }
 
@@ -114,17 +102,7 @@ function formatNodeName(name: string) {
   return formatDimensionValue(node.column, node.value)
 }
 
-// 根据当前勾选状态决定是否禁止取消列，确保图表至少保留两个维度。
-function isColumnDisabled(column: TrafficSankeyColumn) {
-  return selectedColumns.value.length <= 2 && selectedColumnSet.value.has(column)
-}
-
-// 判断这一行是否真实触达上游；只有 direct_upstream 会连接到 upstream 列。
-function shouldIncludeUpstream(row: TrafficSankeyRow) {
-  return row.outcome === 'direct_upstream' && row.upstream !== 'not_recorded'
-}
-
-// 按当前可见列生成一行的路径，非 direct_upstream 的路径会停在 upstream 前。
+// 按当前可见列生成一行的路径，新增维度时继续沿用同一绘图流程。
 function createRowPath(
   row: TrafficSankeyRow,
   columns: readonly TrafficSankeyColumn[],
@@ -132,10 +110,6 @@ function createRowPath(
   const path: SankeyPathNode[] = []
 
   for (const column of columns) {
-    if (column === 'upstream' && !shouldIncludeUpstream(row)) {
-      continue
-    }
-
     path.push({
       column,
       name: createNodeName(column, row[column]),
@@ -242,6 +216,7 @@ const chartStyle = computed(() => ({
 
 const chartOption = computed(() => {
   const lastVisibleDepth = Math.max(0, visibleColumns.value.length - 1)
+  const singleColumn = visibleColumns.value.length === 1
 
   return {
     animationDuration: 400,
@@ -256,7 +231,8 @@ const chartOption = computed(() => {
         data: Array.from(chartData.value.nodeValues, ([name, value]) => ({
           name,
           value,
-          depth: chartData.value.nodeDepths.get(name),
+          // 单列也使用非零布局深度，避免 ECharts 横向缩放时除以零。
+          depth: singleColumn ? 1 : chartData.value.nodeDepths.get(name),
           // 只有最后一列靠近右边缘，标签放到节点左侧才能稳定留在画布内部。
           label:
             chartData.value.nodeDepths.get(name) === lastVisibleDepth
@@ -269,7 +245,8 @@ const chartOption = computed(() => {
         nodeGap: sankeyNodeGap,
         nodeWidth: 14,
         top: 12,
-        right: 16,
+        // 单列节点放在画布中间，多列仍沿用原来的左右布局。
+        right: singleColumn ? '50%' : 16,
         bottom: 12,
         left: 16,
         label: {
@@ -312,7 +289,6 @@ const chartOption = computed(() => {
         <el-checkbox
           v-for="option in columnOptions"
           :key="option.value"
-          :disabled="isColumnDisabled(option.value)"
           :value="option.value"
         >
           {{ option.label }}

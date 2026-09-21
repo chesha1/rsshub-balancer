@@ -1,0 +1,112 @@
+name: Node image
+
+on:
+  push:
+    branches: [main]
+    # Node 会打包共享后端；Docker 安装依赖还会读取全部 workspace 清单。
+    paths:
+      - 'apps/node/**'
+      - 'packages/server-core/**'
+      - 'apps/worker/package.json'
+      - 'apps/web/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'nx.json'
+      - 'tsconfig*.json'
+      - 'biome.json'
+      - '.npmrc'
+      - '.gitignore'
+      - '.dockerignore'
+      - '.github/workflows/node-image.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-image-${{ github.ref }}
+  # 发布过程保留到完成，避免中断镜像上传。
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      NX_ISOLATE_PLUGINS: 'false'
+      NX_DAEMON: 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      # 与 Dockerfile 一致，npm 仅用于引导 pnpm，项目操作全部使用 pnpm。
+      - name: Install pnpm
+        run: npm install --global pnpm@12
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check Node and shared backend
+        run: pnpm exec nx run-many -t typecheck lint --projects=@rsshub-balancer/node,@rsshub-balancer/server-core
+
+  image:
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/node/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=node-image
+          cache-to: type=gha,mode=max,scope=node-image
+      - name: Record published image
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE_NAME: ghcr.io/${{ github.repository }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo '### Node image'
+            echo '```text'
+            printf '%s\n' "$IMAGE_TAGS"
+            printf '%s@%s\n' "${IMAGE_NAME,,}" "$IMAGE_DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

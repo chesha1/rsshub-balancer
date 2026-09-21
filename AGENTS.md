@@ -2,8 +2,16 @@
 
 ## 命令约定
 
-- 本仓库统一使用 `pnpm` 进行包管理和脚本执行。
-- 不要使用 `npm`。
+- 本仓库统一使用 `pnpm` 管理项目依赖和执行项目脚本，不使用 `npm install` 安装项目依赖或 `npm run` 执行项目脚本。
+- 环境引导允许使用 `npm`，例如在 Docker 构建阶段通过镜像自带的 `npm install --global pnpm@<版本>` 安装 pnpm；后续项目操作仍使用 `pnpm`。
+- 根据命令用途判断是否适用上述约定，不要仅因命令包含 `npm` 就拒绝合理的环境配置操作。
+
+## 工具与 CI 版本约定
+
+- Node.js、pnpm 和 GitHub Actions 默认只约束大版本，允许同一大版本内的小版本和补丁更新；例如 `26.x`、`node:26-bookworm-slim`、`pnpm@12`。
+- GitHub Actions 的 `uses` 使用 `@v<大版本>`，例如 `actions/checkout@v7`、`actions/setup-node@v7`；不要固定完整提交 SHA 或具体小版本、补丁版本，也不要附加会过时的具体版本注释。
+- 不要自行以安全加固或可复现构建为由改成精确版本或 SHA；只有用户明确要求时才采用此类固定方式。
+- 此约定针对工具和 Action 的版本选择，项目依赖仍保留锁文件并使用 `pnpm install --frozen-lockfile`。
 
 ## Git 操作约定
 

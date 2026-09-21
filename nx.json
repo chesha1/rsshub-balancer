@@ -3,38 +3,29 @@
   "defaultBase": "main",
   "useDaemonProcess": false,
   "namedInputs": {
-    "default": [
-      "{projectRoot}/**/*",
-      "sharedGlobals"
-    ],
-    "production": [
-      "default"
-    ],
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": ["default"],
     "sharedGlobals": [
       "{workspaceRoot}/package.json",
       "{workspaceRoot}/pnpm-lock.yaml",
       "{workspaceRoot}/tsconfig.base.json",
-      "{workspaceRoot}/biome.json"
+      "{workspaceRoot}/biome.json",
+      "{workspaceRoot}/pnpm-workspace.yaml",
+      "{workspaceRoot}/nx.json"
     ]
   },
   "targetDefaults": {
     "build": {
       "cache": true,
-      "inputs": [
-        "production"
-      ]
+      "inputs": ["production", "^production"]
     },
     "typecheck": {
       "cache": true,
-      "inputs": [
-        "production"
-      ]
+      "inputs": ["production", "^production"]
     },
     "lint": {
       "cache": true,
-      "inputs": [
-        "production"
-      ]
+      "inputs": ["production"]
     }
   },
   "analytics": false

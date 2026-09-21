@@ -16,31 +16,24 @@
     "title": "当前上游实例",
     "introBefore": "以下实例自动从",
     "docsLink": "RSSHub 官方文档",
-    "introAfter": "同步，另包含一个自维护的兜底实例。",
+    "introAfter": "同步，另包含一个自维护的兜底实例；这里展示当前承接请求环境使用的候选列表。",
     "loading": "正在加载当前实例列表…",
     "error": "当前实例列表暂时不可用。"
   },
   "trafficSankey": {
     "title": "最近 24 小时请求流向分布",
-    "summary": "按来源国家/地区、Cloudflare 入口机房、处理结果和真实触达的上游聚合普通入口代理请求。",
+    "summary": "按来源国家/地区和上游聚合普通入口代理请求，连线宽度表示请求数量。",
     "loading": "正在加载最近 24 小时流量分布…",
     "error": "最近 24 小时流量分布暂时不可用。",
     "empty": "最近 24 小时暂无可展示的流量分布数据。",
-    "chartAria": "请求来源国家或地区、Cloudflare 入口机房、处理结果和真实上游的桑基图。",
+    "chartAria": "从请求来源国家或地区流向上游的桑基图，连线宽度表示请求数量。",
     "columnsAria": "选择首页流量桑基图显示的维度列。",
     "columnsLabel": "显示列",
     "columns": {
       "country": "来源国家/地区",
-      "edgeColo": "入口机房",
-      "outcome": "处理结果",
       "upstream": "真实上游"
     },
-    "outcomeValues": {
-      "directUpstream": "直连上游",
-      "isolateCoalesced": "Isolate 合并",
-      "doCoalesced": "DO 合并"
-    },
-    "upstreamNotRecorded": "未记录",
+    "upstreamNotRecorded": "未触达上游",
     "tooltipRequests": "请求数"
   },
   "howItWorks": {
@@ -94,7 +87,7 @@
       },
       "metrics": {
         "status": "🚫 未开放",
-        "notes": "合并收益指标写入 Workers Analytics Engine，通过 SQL API 查询"
+        "notes": "请求来源与上游写入 Workers Analytics Engine，通过 SQL API 查询"
       },
       "openapi": {
         "status": "❌ 不可用",

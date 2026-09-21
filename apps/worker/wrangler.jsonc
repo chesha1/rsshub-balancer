@@ -1,0 +1,52 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rsshub-balancer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-17",
+  "compatibility_flags": ["nodejs_compat", "new_module_registry"],
+  "cache": {
+    "enabled": true
+  },
+  "workers_dev": false,
+  "assets": {
+    "directory": "../../dist/apps/web",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/_internal/*", "/api/*", "/healthz", "/robots.txt"]
+  },
+  "secrets": {
+    "required": [
+      "VALKEY_URL",
+      "CLOUDFLARE_ACCOUNT_ID",
+      "CLOUDFLARE_ANALYTICS_API_TOKEN"
+    ]
+  },
+  "analytics_engine_datasets": [
+    {
+      "binding": "METRICS",
+      "dataset": "rsshub_balancer_request_flows"
+    }
+  ],
+  "migrations": [
+    {
+      "tag": "v1-add-request-coalescer",
+      "new_classes": ["RequestCoalescer"]
+    },
+    {
+      "tag": "v2-remove-request-coalescer",
+      "deleted_classes": ["RequestCoalescer"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      // Cloudflare tracing 默认采样 100%；先保守采样 1%，避免 span 事件量越界。
+      "head_sampling_rate": 0.01
+    }
+  },
+  "triggers": {
+    "crons": ["0 * * * *"]
+  }
+}

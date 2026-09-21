@@ -1,0 +1,74 @@
+import { config } from './config'
+import { cronLogger, errorProps } from './log'
+import * as redis from './redis'
+import * as upstream from './upstream'
+import { trimSlash } from './utils'
+
+// 定时刷新远程 RSSHub 实例列表，健康检查通过后写入 Redis 和本地缓存。
+export async function scheduled(): Promise<void> {
+  const startedAt = Date.now()
+  let previous: string[] = []
+  try {
+    try {
+      previous = (await redis.getInstances()) ?? []
+    } catch {}
+    const remote = await upstream.fetchRemoteInstances()
+    // 与 fallback 合并去重后先排除自身，避免健康检查本身触发递归。
+    const merged = upstream.excludeSelfUpstreams([
+      ...new Set([...remote.map(trimSlash), ...config.fallbackUpstreams]),
+    ])
+    // 并行健康检查，只保留可用实例
+    const checks = await Promise.all(
+      merged.map(async (u) => {
+        try {
+          const res = await fetch(`${u}/healthz`, {
+            signal: AbortSignal.timeout(5000),
+            redirect: 'manual',
+          })
+          // 读取正文也受同一个超时信号约束，避免把返回 2xx 的失效站点当作健康实例。
+          return res.ok && (await res.text()) === 'ok'
+        } catch {
+          return false
+        }
+      }),
+    )
+    const healthy = merged.filter((_, i) => checks[i])
+    const previousSet = new Set(previous)
+    const healthySet = new Set(healthy)
+    const addedHosts = healthy.filter((u) => !previousSet.has(u))
+    const removedHosts = previous.filter((u) => !healthySet.has(u))
+    if (healthy.length === 0) {
+      cronLogger.warn('scheduled refresh found no healthy upstreams', {
+        event: 'cron.refresh',
+        outcome: 'retain_existing',
+        remoteCount: remote.length,
+        mergedCount: merged.length,
+        healthyCount: 0,
+        previousCount: previous.length,
+        durationMs: Date.now() - startedAt,
+      })
+      return
+    }
+    await redis.setInstances(healthy)
+    upstream.cacheInstances(healthy)
+    cronLogger.info('scheduled refresh updated upstream instances', {
+      event: 'cron.refresh',
+      outcome: 'updated',
+      remoteCount: remote.length,
+      mergedCount: merged.length,
+      healthyCount: healthy.length,
+      previousCount: previous.length,
+      addedHosts,
+      removedHosts,
+      durationMs: Date.now() - startedAt,
+    })
+  } catch (e) {
+    cronLogger.warn('scheduled refresh failed; keeping existing instances', {
+      event: 'cron.refresh',
+      outcome: 'retain_existing',
+      previousCount: previous.length,
+      durationMs: Date.now() - startedAt,
+      ...errorProps(e),
+    })
+  }
+}
