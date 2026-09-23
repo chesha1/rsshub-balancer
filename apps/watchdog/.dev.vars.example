@@ -1,0 +1,3 @@
+# 仅限 virworks.moe 的 Workers Routes Write 权限，不复用业务查询凭证。
+# 本地模拟 Cron 也会执行接管逻辑；普通开发不要填写生产凭证并触发模拟入口。
+CLOUDFLARE_ROUTES_API_TOKEN=

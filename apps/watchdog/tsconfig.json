@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "types": ["node"],
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/watchdog.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+}

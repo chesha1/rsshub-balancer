@@ -1,5 +1,5 @@
 {
-  "name": "@rsshub-balancer/worker",
+  "name": "@rsshub-balancer/edge",
   "private": true,
   "type": "module",
   "dependencies": {

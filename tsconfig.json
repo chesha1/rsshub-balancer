@@ -2,10 +2,13 @@
   "files": [],
   "references": [
     {
-      "path": "./apps/worker"
+      "path": "./apps/watchdog"
     },
     {
-      "path": "./apps/node"
+      "path": "./apps/edge"
+    },
+    {
+      "path": "./apps/origin"
     },
     {
       "path": "./apps/web"

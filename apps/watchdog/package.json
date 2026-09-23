@@ -1,0 +1,9 @@
+{
+  "name": "@rsshub-balancer/watchdog",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "cloudflare": "^7.1.0",
+    "fast-xml-parser": "^5.11.1"
+  }
+}

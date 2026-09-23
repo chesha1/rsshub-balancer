@@ -4,7 +4,7 @@
     "composite": true,
     "noEmit": true,
     "types": ["node"],
-    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/node.tsbuildinfo",
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/origin.tsbuildinfo",
     "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*.ts", "vite.config.ts"]

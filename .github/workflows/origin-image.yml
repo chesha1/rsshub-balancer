@@ -1,13 +1,14 @@
-name: Node image
+name: Origin image
 
 on:
   push:
     branches: [main]
     # Node 会打包共享后端；Docker 安装依赖还会读取全部 workspace 清单。
     paths:
-      - 'apps/node/**'
+      - 'apps/origin/**'
       - 'packages/server-core/**'
-      - 'apps/worker/package.json'
+      - 'apps/edge/package.json'
+      - 'apps/watchdog/package.json'
       - 'apps/web/package.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -18,13 +19,13 @@ on:
       - '.npmrc'
       - '.gitignore'
       - '.dockerignore'
-      - '.github/workflows/node-image.yml'
+      - '.github/workflows/origin-image.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: node-image-${{ github.ref }}
+  group: origin-image-${{ github.ref }}
   # 发布过程保留到完成，避免中断镜像上传。
   cancel-in-progress: false
 
@@ -51,7 +52,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Check Node and shared backend
-        run: pnpm exec nx run-many -t typecheck lint --projects=@rsshub-balancer/node,@rsshub-balancer/server-core
+        run: pnpm exec nx run-many -t typecheck lint --projects=@rsshub-balancer/origin,@rsshub-balancer/server-core
 
   image:
     needs: check
@@ -90,13 +91,13 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: apps/node/Dockerfile
+          file: apps/origin/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=node-image
-          cache-to: type=gha,mode=max,scope=node-image
+          cache-from: type=gha,scope=origin-image
+          cache-to: type=gha,mode=max,scope=origin-image
       - name: Record published image
         env:
           IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
@@ -104,7 +105,7 @@ jobs:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           {
-            echo '### Node image'
+            echo '### Origin image'
             echo '```text'
             printf '%s\n' "$IMAGE_TAGS"
             printf '%s@%s\n' "${IMAGE_NAME,,}" "$IMAGE_DIGEST"

@@ -30,7 +30,7 @@ export async function handleMetricsIngest(request: Request): Promise<Response> {
   return new Response(null, { status: 204 })
 }
 
-export const ingestRoutes = new Hono<{ Bindings: CloudflareBindings }>()
+export const ingestRoutes = new Hono<{ Bindings: EdgeBindings }>()
 
 // 路由层限制路径、方法和 binding，缓存头由公共中间件统一设置。
 ingestRoutes.all(METRICS_INGEST_PATH, (c) => {

@@ -11,4 +11,9 @@ metrics.configureMetrics(nodeMetrics.recordMetric)
 
 export const app = new Hono()
 registerCommonMiddleware(app)
+// 探活通过应用标识确认固定入口仍到达 origin，健康判断继续使用共享接口。
+app.use('/healthz', async (c, next) => {
+  await next()
+  c.header('X-RSSHub-App', 'origin')
+})
 app.route('/', routes)

@@ -1,17 +1,17 @@
 # 共享代码与运行时
 
-共享运行时已部署，本次线上验收已于 2026-09-23 按用户 Dashboard 核验结果完成，见[实施状态](./implementation-status.md)。后端拆为 `apps/worker`、`apps/node` 和 `packages/server-core`；两端应用依赖共享包，分别装配平台能力，共享包不反向导入应用或适配器。[路由](./README.md#路由)、[指标](./sankey-analytics-engine-ingestion-plan.md)和[缓存](./zone-cache-plan.md)分别遵循对应约定。
+共享运行时已部署，本次线上验收已于 2026-09-23 按用户 Dashboard 核验结果完成，见[实施状态](./implementation-status.md)。后端拆为 `apps/edge`、`apps/origin` 和 `packages/server-core`；两端应用依赖共享包，分别装配平台能力，共享包不反向导入应用或适配器。[路由](./README.md#路由)、[指标](./sankey-analytics-engine-ingestion-plan.md)和[缓存](./zone-cache-plan.md)分别遵循对应约定。
 
 共享业务接口及 Worker 独有 ingest 均先于保留前缀 404 和 RSS catch-all 注册。
 
-Worker 入口为 [worker/src/index.ts](../../apps/worker/src/index.ts)，Node 开发和构建入口为 [node/src/index.ts](../../apps/node/src/index.ts)。两端各自的 `src/app.ts` 配置一次 Redis 和指标模块，创建 Hono 应用并调用 `registerCommonMiddleware(app)`，最后通过 `app.route()` 挂载共享 [routes](../../packages/server-core/src/app.ts)。Node 通过 `serve({ fetch: app.fetch, ... })` 监听，Worker 把当前请求交给 `app.fetch()`。Worker 在公共中间件之后、共享路由之前注册 ingest，保证它先于保留路径 404 和 RSS catch-all；Node 不注册 ingest。定时刷新直接调用共享 `scheduled()`。
+Worker 入口为 [edge/src/index.ts](../../apps/edge/src/index.ts)，Node 开发和构建入口为 [origin/src/index.ts](../../apps/origin/src/index.ts)。两端各自的 `src/app.ts` 配置一次 Redis 和指标模块，创建 Hono 应用并调用 `registerCommonMiddleware(app)`，最后通过 `app.route()` 挂载共享 [routes](../../packages/server-core/src/app.ts)。Node 通过 `serve({ fetch: app.fetch, ... })` 监听，Worker 把当前请求交给 `app.fetch()`。Worker 在公共中间件之后、共享路由之前注册 ingest，保证它先于保留路径 404 和 RSS catch-all；Node 不注册 ingest。定时刷新直接调用共享 `scheduled()`。
 
 `upstream.ts` 直接导出业务函数，模块内保存上游缓存和刷新 Promise，当前进程或 isolate 的 HTTP 与定时刷新共用状态；两端独立运行。共享模块按单应用使用，配置必须在首次业务调用前完成，之后禁止切换实现。两端共享 `hono/proxy` 转发；指标模块通过 `configureMetrics()` 保存记录函数，业务只调用 `metrics.recordRouteRequestMetric()`。Worker 的记录函数在请求中通过 `cloudflare:workers` 的 `env` 读取 `METRICS`，共享包不导入 Worker API 或保存 binding；Node 记录函数只入队。Node 入口按 `METRICS_INGEST_URL` 显式调用 `startMetricsUpload()`，导入模块本身不启动后台任务。
 
 ## 配置与构建
 
-- 普通配置由各模块按需读取 `process.env`；Node 在 [node/src/index.ts](../../apps/node/src/index.ts) 中直接读取指标上传地址，配置错误在实际使用时暴露。Worker vars/secrets 提供普通值，`METRICS` 对象 binding 仅在 Worker 内处理当前请求时访问；Node 由容器注入环境变量，真实密钥不入库或镜像。
-- 共用 pnpm 锁文件，开发、构建和本地启动任务统一由 Nx 调度。Worker 经官方 Cloudflare Vite 插件构建，脚本与独立 Redis SDK 模块输出到 `dist/apps/worker/server`，首页产物复制到并列的 `public/`；发布使用生成的 `server/wrangler.json`，保留 `no_bundle` 和模块规则。Node 通过 [vite.config.ts](../../apps/node/vite.config.ts) 将 Node 入口及共享源码独立打包为 ESM 产物，运行时使用 `@hono/node-server`；固定监听 `0.0.0.0:3000`，容器对外入口由部署配置中的端口映射或反向代理控制。两端分别类型检查；Worker 独自持有生成类型和前端构建依赖。共享包使用 `workspace:*` 链接源码，由各应用打包，Nx 缓存输入包含共享包源码。
+- 普通配置由各模块按需读取 `process.env`；Node 在 [origin/src/index.ts](../../apps/origin/src/index.ts) 中直接读取指标上传地址，配置错误在实际使用时暴露。Worker vars/secrets 提供普通值，`METRICS` 对象 binding 仅在 Worker 内处理当前请求时访问；Node 由容器注入环境变量，真实密钥不入库或镜像。
+- 共用 pnpm 锁文件，开发、构建和本地启动任务统一由 Nx 调度。Worker 经官方 Cloudflare Vite 插件构建，脚本与独立 Redis SDK 模块输出到 `dist/apps/edge/server`，首页产物复制到并列的 `public/`；发布使用生成的 `server/wrangler.json`，保留 `no_bundle` 和模块规则。Node 通过 [vite.config.ts](../../apps/origin/vite.config.ts) 将 Node 入口及共享源码独立打包为 ESM 产物，运行时使用 `@hono/node-server`；固定监听 `0.0.0.0:3000`，容器对外入口由部署配置中的端口映射或反向代理控制。两端分别类型检查；Worker 独自持有生成类型和前端构建依赖。共享包使用 `workspace:*` 链接源码，由各应用打包，Nx 缓存输入包含共享包源码。
 - Worker 开发时使用 Vite 的 `hotUpdate` 钩子使变更模块失效，并触发整个 Worker 模块图重载，避免局部替换平台函数后与已有的一次性配置冲突；该钩子仅用于开发，不进入构建。Node 开发继续由 `tsx watch` 重启进程。
 - 开发、构建和运行采用 Node 26，`engines` 限定为 `26.x`，容器构建和运行使用 `node:26-bookworm-slim`；包管理采用 pnpm 12，Docker 构建阶段通过 `npm install --global pnpm@12` 安装。
 
@@ -42,7 +42,7 @@ Worker 入口为 [worker/src/index.ts](../../apps/worker/src/index.ts)，Node �
 
 Worker 使用本包的 `runRedisCommand()`，每命令 `connect → command → finally destroy`，不跨请求共享 socket。Node 使用本包中的同名函数复用进程内 client，供 HTTP 和定时刷新共用。两端在启动时将命令执行器配置到共享 redis 模块，Worker 不导入 Node 的连接状态机；建连与命令各限 2 秒，命令时限从提交起覆盖排队、发送及回复，禁用自动重连和离线队列。
 
-Worker 的 `@redis/client` 通过动态导入单独分包，首次执行 Redis 操作时才加载；`new_module_registry` 让未导入模块延后编译。ingest 不访问 Redis，因此不加载 SDK。运行时缓存的是 SDK 模块，每次命令仍创建并关闭独立连接；Node 的连接实现不受影响。`dev:worker` 由 Vite 接管，默认允许远程绑定，具体资源按 Wrangler 配置选择；代码在本机 workerd 中执行。发布产物的分包与首次查询行为已在本地 workerd 中验证，记录见[实施状态](./implementation-status.md#已完成的本地验证)。
+Worker 的 `@redis/client` 通过动态导入单独分包，首次执行 Redis 操作时才加载；`new_module_registry` 让未导入模块延后编译。ingest 不访问 Redis，因此不加载 SDK。运行时缓存的是 SDK 模块，每次命令仍创建并关闭独立连接；Node 的连接实现不受影响。`dev:edge` 由 Vite 接管，默认允许远程绑定，具体资源按 Wrangler 配置选择；代码在本机 workerd 中执行。发布产物的分包与首次查询行为已在本地 workerd 中验证，记录见[实施状态](./implementation-status.md#已完成的本地验证)。
 
 以下连接复用及运行时命令超时恢复要求适用于 Node：
 
@@ -56,7 +56,7 @@ Worker 的 `@redis/client` 通过动态导入单独分包，首次执行 Redis �
 
 共享上游刷新函数 `scheduled()` 保留在 [scheduled.ts](../../packages/server-core/src/scheduled.ts)，Worker Cron、Node 启动及每小时分别调用并写各自空间。保留候选抓取、合并 fallback 和健康检查；失败或零健康节点保留旧值并 warning。列表下载含完整正文限 15 秒，使用可取消信号；其余沿用现有超时。允许轮次重叠，下载失败结束本轮，后续照常触发。
 
-Node 在 `apps/node/src/index.ts` 中启动 HTTP 服务和定时刷新，不注册应用层 SIGINT/SIGTERM 处理。收到信号后按 Node 默认行为直接终止，不等待在途 HTTP 响应、刷新或指标上传，也不执行退出提交。允许中断未完成请求并丢失未上传指标，客户端连接随进程终止释放。日常发布先确认 Worker 接管再更新 Node，容器信号与停止配置见[操作手册](./migration-failover-runbook.md)。
+Node 在 `apps/origin/src/index.ts` 中启动 HTTP 服务和定时刷新，不注册应用层 SIGINT/SIGTERM 处理。收到信号后按 Node 默认行为直接终止，不等待在途 HTTP 响应、刷新或指标上传，也不执行退出提交。允许中断未完成请求并丢失未上传指标，客户端连接随进程终止释放。日常发布先确认 Worker 接管再更新 Node，容器信号与停止配置见[操作手册](./migration-failover-runbook.md)。
 
 ## HTTP 与验证
 

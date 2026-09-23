@@ -11,7 +11,7 @@ Worker binding、线上查询和配套首页已核对，Oracle 空批次 ingest 
 
 ## 字段契约
 
-共享业务统一调用 `metrics.ts` 的 `recordRouteRequestMetric()` 记录 `RouteRequestMetric`，每事件一点；事件类型和批次常量位于 `packages/server-core/src/metrics-schema.ts`。Worker 自身请求和 ingest 共用 `apps/worker/src/metrics.ts` 的 `recordMetric(event)`，由它在当前请求中读取 `env.METRICS`，不再逐层传递 binding：
+共享业务统一调用 `metrics.ts` 的 `recordRouteRequestMetric()` 记录 `RouteRequestMetric`，每事件一点；事件类型和批次常量位于 `packages/server-core/src/metrics-schema.ts`。Worker 自身请求和 ingest 共用 `apps/edge/src/metrics.ts` 的 `recordMetric(event)`，由它在当前请求中读取 `env.METRICS`，不再逐层传递 binding：
 
 | 字段 | 固定值或含义 |
 | --- | --- |
@@ -24,7 +24,7 @@ country 取原始 RSS 请求：Node 直接读取 `CF-IPCountry`；Worker 优先�
 
 ## Node 批量提交
 
-- [node/src/metrics.ts](../../apps/node/src/metrics.ts) 在模块内保存队列、上传任务、丢弃计数和定时器。Node 启动入口读取 `METRICS_INGEST_URL` 并调用 `startMetricsUpload()`；共享应用生成国家和上游事件后调用启动时配置的记录函数，由 Node 的 `recordMetric()` 入队，未启用时不入队。导入模块不启动上传或定时器，重复启动不会多开定时器。
+- [origin/src/metrics.ts](../../apps/origin/src/metrics.ts) 在模块内保存队列、上传任务、丢弃计数和定时器。Node 启动入口读取 `METRICS_INGEST_URL` 并调用 `startMetricsUpload()`；共享应用生成国家和上游事件后调用启动时配置的记录函数，由 Node 的 `recordMetric()` 入队，未启用时不入队。导入模块不启动上传或定时器，重复启动不会多开定时器。
 - 配置 `METRICS_INGEST_URL` 即启用上传，无需 ingest token；留空时关闭上传。配置要求见[实施状态](./implementation-status.md#本地运行)。
 - 请求完成后只入队，不等待上传。达到 100 条或每 15 秒触发；每批最多 200 条，同一进程单批串行，单批上传限 5 秒。
 - 队列积压上限为 2000 条；超限丢最旧指标，以 `droppedEventCount` 汇总本地 warning。

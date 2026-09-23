@@ -1,44 +1,44 @@
 {
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "name": "@rsshub-balancer/node",
+  "name": "@rsshub-balancer/origin",
   "projectType": "application",
-  "sourceRoot": "apps/node/src",
+  "sourceRoot": "apps/origin/src",
   "targets": {
     "dev": {
       "continuous": true,
       "options": {
         "command": "tsx watch --env-file=.env src/index.ts",
-        "cwd": "apps/node"
+        "cwd": "apps/origin"
       },
       "executor": "nx:run-commands"
     },
     "start": {
       "continuous": true,
       "options": {
-        "command": "node --env-file=.env ../../dist/apps/node/node.js",
-        "cwd": "apps/node"
+        "command": "node --env-file=.env ../../dist/apps/origin/index.js",
+        "cwd": "apps/origin"
       },
       "executor": "nx:run-commands"
     },
     "build": {
-      "outputs": ["{workspaceRoot}/dist/apps/node"],
+      "outputs": ["{workspaceRoot}/dist/apps/origin"],
       "options": {
         "command": "vite build",
-        "cwd": "apps/node"
+        "cwd": "apps/origin"
       },
       "executor": "nx:run-commands"
     },
     "typecheck": {
       "options": {
         "command": "tsc --noEmit",
-        "cwd": "apps/node"
+        "cwd": "apps/origin"
       },
       "executor": "nx:run-commands"
     },
     "lint": {
       "options": {
         "command": "biome check . --files-ignore-unknown=true",
-        "cwd": "apps/node"
+        "cwd": "apps/origin"
       },
       "executor": "nx:run-commands"
     }

@@ -1,54 +1,54 @@
 {
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "name": "@rsshub-balancer/worker",
+  "name": "@rsshub-balancer/edge",
   "projectType": "application",
-  "sourceRoot": "apps/worker/src",
+  "sourceRoot": "apps/edge/src",
   "targets": {
     "dev": {
       "continuous": true,
       "dependsOn": ["^build"],
       "options": {
         "command": "vite dev",
-        "cwd": "apps/worker"
+        "cwd": "apps/edge"
       },
       "executor": "nx:run-commands"
     },
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["{workspaceRoot}/dist/apps/worker"],
+      "outputs": ["{workspaceRoot}/dist/apps/edge"],
       "options": {
         "command": "vite build",
-        "cwd": "apps/worker"
+        "cwd": "apps/edge"
       },
       "executor": "nx:run-commands"
     },
     "deploy": {
       "dependsOn": ["build"],
       "options": {
-        "command": "wrangler deploy --config ../../dist/apps/worker/server/wrangler.json",
-        "cwd": "apps/worker"
+        "command": "wrangler deploy --config ../../dist/apps/edge/server/wrangler.json",
+        "cwd": "apps/edge"
       },
       "executor": "nx:run-commands"
     },
     "cf-typegen": {
       "outputs": ["{projectRoot}/worker-configuration.d.ts"],
       "options": {
-        "command": "wrangler types --config wrangler.jsonc --env-interface CloudflareBindings worker-configuration.d.ts",
-        "cwd": "apps/worker"
+        "command": "wrangler types --config wrangler.jsonc --env-interface EdgeBindings worker-configuration.d.ts",
+        "cwd": "apps/edge"
       },
       "executor": "nx:run-commands"
     },
     "typecheck": {
       "options": {
         "command": "tsc --noEmit",
-        "cwd": "apps/worker"
+        "cwd": "apps/edge"
       },
       "executor": "nx:run-commands"
     },
     "lint": {
       "options": {
         "command": "biome check . --files-ignore-unknown=true",
-        "cwd": "apps/worker"
+        "cwd": "apps/edge"
       },
       "executor": "nx:run-commands"
     }

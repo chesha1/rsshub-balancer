@@ -1,5 +1,5 @@
 {
-  "name": "@rsshub-balancer/node",
+  "name": "@rsshub-balancer/origin",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -12,6 +12,6 @@
     "node": "26.x"
   },
   "scripts": {
-    "start": "node ../../dist/apps/node/node.js"
+    "start": "node ../../dist/apps/origin/index.js"
   }
 }

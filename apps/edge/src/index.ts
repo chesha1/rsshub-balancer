@@ -10,4 +10,4 @@ export default {
   async scheduled() {
     await scheduled()
   },
-} satisfies ExportedHandler<CloudflareBindings>
+} satisfies ExportedHandler<EdgeBindings>

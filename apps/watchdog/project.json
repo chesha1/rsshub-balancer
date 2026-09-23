@@ -1,0 +1,53 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "@rsshub-balancer/watchdog",
+  "projectType": "application",
+  "sourceRoot": "apps/watchdog/src",
+  "targets": {
+    "dev": {
+      "continuous": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "wrangler dev --local --test-scheduled --port 8788",
+        "cwd": "apps/watchdog"
+      }
+    },
+    "build": {
+      "outputs": ["{workspaceRoot}/dist/apps/watchdog"],
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "wrangler deploy --dry-run --outdir ../../dist/apps/watchdog",
+        "cwd": "apps/watchdog"
+      }
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "wrangler deploy",
+        "cwd": "apps/watchdog"
+      }
+    },
+    "cf-typegen": {
+      "outputs": ["{projectRoot}/worker-configuration.d.ts"],
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "wrangler types --env-interface WatchdogBindings --strict-vars=false worker-configuration.d.ts",
+        "cwd": "apps/watchdog"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "apps/watchdog"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "biome check . --files-ignore-unknown=true",
+        "cwd": "apps/watchdog"
+      }
+    }
+  }
+}

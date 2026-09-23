@@ -2,7 +2,7 @@
 
 两端使用各自包中的 `@redis/client` 直连 Redis/Valkey，通过共享 [redis 模块](../packages/server-core/src/redis.ts) 读写业务状态。应用启动时调用 `configureRedis()`，固定 `node` / `worker` 命名空间和各自的 `runRedisCommand`；同一配置可重复调用，更换命名空间或执行器会报错。部署提供 `VALKEY_URL`。KV、Redis HTTP、相关 binding/依赖以及 `STATE_STORE_BACKEND` 均已删除；线上部署进度见[实施状态](./worker-migration/implementation-status.md)。
 
-共享包定义所需的命令接口和 key、JSON、TTL 规则，不导入 Redis SDK 或平台适配器。业务直接导入 redis 模块，调用 `redis.getInstances()`、`redis.setInstances()` 等操作。[Worker 实现](../apps/worker/src/redis.ts)按连接、执行、关闭完成一条命令；[Node 实现](../apps/node/src/redis.ts)独立保存进程连接并处理运行时超时恢复，Worker 无需参与连接复用状态管理。
+共享包定义所需的命令接口和 key、JSON、TTL 规则，不导入 Redis SDK 或平台适配器。业务直接导入 redis 模块，调用 `redis.getInstances()`、`redis.setInstances()` 等操作。[Worker 实现](../apps/edge/src/redis.ts)按连接、执行、关闭完成一条命令；[Node 实现](../apps/origin/src/redis.ts)独立保存进程连接并处理运行时超时恢复，Worker 无需参与连接复用状态管理。
 
 | 入口 | 连接生命周期 | 实例 key | 失败标记 key |
 | --- | --- | --- | --- |

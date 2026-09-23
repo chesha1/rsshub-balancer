@@ -2,23 +2,25 @@
 
 2026-09-22 用户已删除主域名 catch-all，完成切到 Node 的路由配置。API 读回确认只保留首页、静态资源和 ingest 三条长期 Routes，均绑定 `rsshub-balancer`；RSS 和业务查询按方案回源 Node。2026-09-23 用户确认服务在线上运行良好，并已通过各类 Dashboard 完成验收。本次迁移及切流后验收按该确认完成，不再追加专项验收。
 
-Worker 最近核对的活动版本为 `54a36e69-4eba-4516-8f75-216d1c3c201c`（该版本承接 100% Worker 流量，并非全站流量），指标 binding 为 `rsshub_balancer_request_flows`。Full (strict)、可信来源限制、ingest 白名单及 DNS／重定向／缓存配置已由用户确认完成，2026-09-23 公开桑基图查询已返回最近 24 小时的数据。独立恢复演练按用户决定不再安排；下一步实现独立探活 Worker 自动接管，以及接管／恢复两个手动 Actions flow，恢复保持手动。
+Worker 最近核对的活动版本为 `54a36e69-4eba-4516-8f75-216d1c3c201c`（该版本承接 100% Worker 流量，并非全站流量），指标 binding 为 `rsshub_balancer_request_flows`。Full (strict)、可信来源限制、ingest 白名单及 DNS／重定向／缓存配置已由用户确认完成，2026-09-23 公开桑基图查询已返回最近 24 小时的数据。独立恢复演练按用户决定不再安排；独立探活 Worker 已实现自动接管和恢复，待部署启用，维护用的接管／恢复两个手动 Actions flow 待实现。
+
+2026-09-24 用户告知固定云下验证域名已改为 `rsshub-balancer-origin.virworks.moe`，仓库已同步 watchdog 探活地址和操作文档。下方历史检查记录中的旧域名保留当时实际值，不代表新域名已完成相同检查。
 
 ## 已实施
 
 | 范围 | 当前实现 |
 | --- | --- |
-| 共享业务与双入口 | `apps/worker`、`apps/node` 依赖 `packages/server-core`，启动时固定存储和指标实现，各自创建 Hono 应用，按公共中间件、平台专属路由、共享路由的顺序挂载。业务与定时刷新直接调用共享模块函数。RSS、上游列表、桑基图查询、`/healthz` 与路由缓存状态查询共用业务逻辑，保留 URL；ingest 由 Worker 单独注册。 |
+| 共享业务与双入口 | `apps/edge`、`apps/origin` 依赖 `packages/server-core`，启动时固定存储和指标实现，各自创建 Hono 应用，按公共中间件、平台专属路由、共享路由的顺序挂载。业务与定时刷新直接调用共享模块函数。RSS、上游列表、桑基图查询、`/healthz` 与路由缓存状态查询共用业务逻辑，保留 URL；ingest 由 Worker 单独注册。 |
 | Redis | 两端分别调用一次 `redis.configureRedis()`，固定命名空间及本包的命令执行器；业务直接调用 `redis.getInstances()` 等模块函数。同一配置可重复调用，禁止切换命名空间或实现。保留直连 Redis/Valkey、`node:` / `worker:` 前缀、失败 key 编码和 6 小时 TTL，不读取、复制或回退旧无前缀 key。 |
 | Redis 生命周期 | 各应用的 `redis.ts` 提供配置到共享 redis 模块的命令函数；Worker 按连接、执行、finally 关闭完成单次操作，Node 独立管理连接复用、并发建连与运行时超时恢复。连接与命令各限 2 秒，禁用自动重连与离线队列；不明写入不重发，Node 超时连接按原在途截止时间收尾，随后允许新操作重建。进程终止不清空 Redis 已有状态。 |
 | 缓存与刷新 | `upstream.ts` 以模块变量保存缓存及并发刷新任务，当前进程或 isolate 的 HTTP 和定时刷新共用状态，两端独立。600 秒过期后等待同一轮读取，空值或失败保留旧列表，无旧列表时使用固定 fallback。失败标记在请求内等待写入。`scheduled.ts` 的 `scheduled()` 由 Node 启动/每小时和 Worker Cron 调用，下载正文限 15 秒，零健康节点保旧。 |
 | HTTP 转发 | 两端共享 `hono/proxy`，覆盖 RSS 顺序尝试和路由缓存状态查询；保留各自方法、重定向和超时约定，其余内部请求继续使用 `fetch`。Node 使用 `@hono/node-server` 默认 Request/Response，直接传入 `app.fetch`，删除独立 HTTP 适配器。接受的压缩与请求头差异见 [HTTP 约定](./shared-code-runtime-plan.md#http-与验证)。实时接口成功与错误响应统一添加双 `no-store`。 |
-| Node 生命周期 | `apps/node/src/index.ts` 启动先直接读取 `process.env` 中的入口配置并刷新，再监听。SIGINT/SIGTERM 使用 Node 默认终止行为，不等待在途 HTTP、刷新或指标上传；允许中断未完成请求并丢失未上传指标。 |
+| Node 生命周期 | `apps/origin/src/index.ts` 启动先直接读取 `process.env` 中的入口配置并刷新，再监听。SIGINT/SIGTERM 使用 Node 默认终止行为，不等待在途 HTTP、刷新或指标上传；允许中断未完成请求并丢失未上传指标。 |
 | 日志 | 两端直接通过 `console` 输出逐行 JSON，仅记录 warning 及以上。请求上下文只保留 Request ID、方法和路径，错误日志保留必要业务信息；去掉 runtime、layer、地域字段、日志平台切换及无输出的逐请求访问日志中间件，分别在 Docker logs、Cloudflare Dashboard 查看。 |
 | 指标采集与回传 | 共享 `metrics-schema.ts` 只定义 `country`、`upstream` 事件和批次上限；两端通过 `metrics.configureMetrics()` 固定记录函数，共享业务直接记录两个字段。Worker 仅写 `blobs: [country, upstream]`，不写 indexes、doubles、版本或占位列，请求内通过 `cloudflare:workers` 的 `env` 读取 binding。Node 包保存队列和上传状态，由启动入口按 `METRICS_INGEST_URL` 调用 `startMetricsUpload()`。队列最多 2000 条，100 条或 15 秒触发，每批最多 200 条串行上传；单批限时 5 秒且只尝试一次，积压丢旧、失败丢批并汇总 warning。 |
 | Worker ingest | 精确 `POST /_internal/metrics/ingest`，由 Cloudflare WAF 限制服务器公网出口 IP；应用直接解析 `{ events }`，调用 Worker 写入函数按国家、上游两列写入，所有响应双 `no-store`。Node 对此路径返回 404。 |
 | 查询与必要首页适配 | 共用 Analytics Engine HTTP SQL 查询，按 `country -> upstream` 聚合，用 `sum(_sample_interval)` 计数；首页保留维度复选框和按可见列绘图的逻辑，当前提供国家、上游两个选项，可自由勾选或取消。保留数量与悬浮提示，删除旧处理结果类型，同步中英文文案。 |
-| 构建与容器 | pnpm workspace 包依赖和 Nx 任务分别归属 Worker、Node、共享包及首页。Worker 使用官方 Cloudflare Vite 插件，依赖首页构建并保留 Redis SDK 动态模块，启用 `new_module_registry`；发布使用生成的 `no_bundle` 配置。Node 由本包 Vite 配置独立打包；共享包导出源码，构建与检查缓存跟踪依赖源码。Node Dockerfile 在 `apps/node`，开发、构建与运行统一 Node 26（`26.x`），容器使用 `node:26-bookworm-slim`，构建阶段安装 pnpm 12。 |
+| 构建与容器 | pnpm workspace 包依赖和 Nx 任务分别归属 Worker、Node、共享包及首页。Worker 使用官方 Cloudflare Vite 插件，依赖首页构建并保留 Redis SDK 动态模块，启用 `new_module_registry`；发布使用生成的 `no_bundle` 配置。Node 由本包 Vite 配置独立打包；共享包导出源码，构建与检查缓存跟踪依赖源码。Node Dockerfile 在 `apps/origin`，开发、构建与运行统一 Node 26（`26.x`），容器使用 `node:26-bookworm-slim`，构建阶段安装 pnpm 12。 |
 
 ## 本地运行
 
@@ -26,13 +28,13 @@ Worker 最近核对的活动版本为 `54a36e69-4eba-4516-8f75-216d1c3c201c`（�
 
 ```sh
 pnpm install --frozen-lockfile
-cp apps/node/.env.example apps/node/.env
+cp apps/origin/.env.example apps/origin/.env
 # 填写 VALKEY_URL；查询与上传按下面说明配置。
-pnpm build:node
-pnpm start:node
+pnpm build:origin
+pnpm start:origin
 ```
 
-`pnpm dev:node` 通过 `tsx watch` 执行 [node/src/index.ts](../../apps/node/src/index.ts)，使用相同 `.env` 开发。Node 开发和构建产物均固定监听 `0.0.0.0:3000`，容器对外入口由部署配置中的端口映射或反向代理控制。Worker 使用 `pnpm dev:worker`（保留 `dev:server` 别名）运行 Vite，监听 `127.0.0.1:8787`，使用 `apps/worker/.dev.vars`。Remote bindings 支持默认开启，支持的资源由 Wrangler 配置中的 `remote: true` 选择；当前 Analytics Engine 使用本地模拟，Redis 由 SDK 直连配置的地址。普通配置由各模块按需读取 `process.env`，Node 在 `apps/node/src/index.ts` 中直接读取指标上传地址，配置错误在实际使用时暴露。Worker 的指标记录函数在请求内读取 `METRICS` binding，共享模块只保存函数引用。
+`pnpm dev:origin` 通过 `tsx watch` 执行 [origin/src/index.ts](../../apps/origin/src/index.ts)，使用相同 `.env` 开发。Node 开发和构建产物均固定监听 `0.0.0.0:3000`，容器对外入口由部署配置中的端口映射或反向代理控制。Worker 使用 `pnpm dev:edge`运行 Vite，监听 `127.0.0.1:8787`，使用 `apps/edge/.dev.vars`。Remote bindings 支持默认开启，支持的资源由 Wrangler 配置中的 `remote: true` 选择；当前 Analytics Engine 使用本地模拟，Redis 由 SDK 直连配置的地址。普通配置由各模块按需读取 `process.env`，Node 在 `apps/origin/src/index.ts` 中直接读取指标上传地址，配置错误在实际使用时暴露。Worker 的指标记录函数在请求内读取 `METRICS` binding，共享模块只保存函数引用。
 
 | 配置 | 使用方式 |
 | --- | --- |
@@ -40,11 +42,11 @@ pnpm start:node
 | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_ANALYTICS_API_TOKEN` | 成对配置，用于服务端 Analytics Engine 查询。缺少任一项时查询返回 500；本地可以留空，正式切流前必须配置。 |
 | `METRICS_INGEST_URL` | Node 配置后启用上传；URL 必须为 HTTPS，精确以 `/_internal/metrics/ingest` 结尾，无 query/尾斜线。留空只适合本地 smoke；正式切流必须启用，ingest 由 Cloudflare WAF 限制服务器公网出口 IP。 |
 
-`pnpm build` 通过 Nx 构建两端和首页，`pnpm build:node` 只执行 Node 构建任务，通过 [vite.config.ts](../../apps/node/vite.config.ts) 独立打包 Node 入口、共享源码及依赖，`pnpm build:worker` 包含首页。入口产物分别为 `dist/apps/node/node.js` 与 `dist/apps/worker/server/index.js`，Worker 首页位于 `dist/apps/worker/public`。`pnpm deploy` 先构建，再使用 `dist/apps/worker/server/wrangler.json` 发布，保留独立 SDK 模块。Node 26 默认通过原生语法检测识别独立产物中的 ESM，无需额外生成 `package.json`；不依赖 Worker 生成类型、Web 产物或运行时 `node_modules`。Docker 构建也执行 `pnpm build:node`，复用同一个 Nx 任务；运行容器直接通过 `node node.js` 启动服务。
+`pnpm build` 通过 Nx 构建 origin、edge、watchdog 和首页，`pnpm build:origin` 只执行 Node 构建任务，通过 [vite.config.ts](../../apps/origin/vite.config.ts) 独立打包 Node 入口、共享源码及依赖，`pnpm build:edge` 包含首页。入口产物分别为 `dist/apps/origin/index.js` 与 `dist/apps/edge/server/index.js`，Worker 首页位于 `dist/apps/edge/public`。`pnpm deploy` 先构建，再使用 `dist/apps/edge/server/wrangler.json` 发布，保留独立 SDK 模块。Node 26 默认通过原生语法检测识别独立产物中的 ESM，无需额外生成 `package.json`；不依赖 Worker 生成类型、Web 产物或运行时 `node_modules`。Docker 构建也执行 `pnpm build:origin`，复用同一个 Nx 任务；运行容器直接通过 `node index.js` 启动服务。
 
 ```sh
-docker build -f apps/node/Dockerfile -t rsshub-balancer-node:local .
-docker run --rm --init --env-file apps/node/.env -p 3000:3000 rsshub-balancer-node:local
+docker build -f apps/origin/Dockerfile -t rsshub-balancer-origin:local .
+docker run --rm --init --env-file apps/origin/.env -p 3000:3000 rsshub-balancer-origin:local
 ```
 
 容器内 `VALKEY_URL` 必须能从容器网络访问。Docker 使用 `--init`，Compose 设置 `init: true`，让轻量 init 转发停止信号，避免 Node 直接作为 PID 1。首页及静态资源仍由 Worker 托管；Node 本机入口用于后端验证。
@@ -59,11 +61,23 @@ docker run --rm --init --env-file apps/node/.env -p 3000:3000 rsshub-balancer-no
 
 Worker 开发使用 Vite，并显式启用 Remote bindings 支持，保留 `new_module_registry`。当前使用官方原始插件 `1.54.11`：其备用加载器会把 `node:process` 的正常查找未命中记为断言错误，随后 workerd 仍能解析内置实现。该上游兼容问题在不含业务依赖的空白 Worker 中也可复现，目前保留这条开发日志。
 
-Vite 开发改动已通过四个项目的类型检查、lint、Worker/首页构建和 Wrangler 部署 dry-run。本机 Redis 替身与 HTTP 上游验证了唯一的 `dev:worker` 入口、首页及 JS 资源、有效 ingest、Redis 查询、健康检查和 `dev:web` 代理；上述启动日志未阻止服务就绪，显式导入与全局 `process.env` 的引用一致性和配置变量读取正常。临时配置和进程均已清理，未使用云端数据资源或执行线上部署。
+Vite 开发改动已通过四个项目的类型检查、lint、Worker/首页构建和 Wrangler 部署 dry-run。本机 Redis 替身与 HTTP 上游验证了唯一的 `dev:edge` 入口、首页及 JS 资源、有效 ingest、Redis 查询、健康检查和 `dev:web` 代理；上述启动日志未阻止服务就绪，显式导入与全局 `process.env` 的引用一致性和配置变量读取正常。临时配置和进程均已清理，未使用云端数据资源或执行线上部署。
 
 兼容日期已更新为 `2026-09-17`，保留显式 `new_module_registry`。更新后重新生成 Worker 类型，通过类型检查、lint、Worker 构建与部署 dry-run，并使用临时本地 workerd、Redis 和 HTTP 上游验证首页、有效 ingest、Redis 查询、流式及 gzip 代理；未恢复测试文件，尚未部署线上。
 
-测试文件及测试任务现已移除；以下保留删除前已经完成的验证记录。
+独立探活 Worker 简化前的版本曾通过 34 个封闭网络测试，覆盖健康提前结束、故障接管、API 不确定结果、路由冲突和并发恢复；本地 workerd 另外通过 5 个 scheduled 场景，模拟接管只产生一次 POST，未访问线上 API。Node 与业务 Worker 的健康接口在 200／503 下均通过来源标识与禁止缓存响应验证。当时类型检查、lint 和三个应用构建通过；未部署或修改线上路由。测试文件、临时验证脚本及测试任务现已移除。
+
+watchdog 单向接管版本只按状态码和应用标识探活，并管理约定的 catch-all。当时探活只返回健康状态和来源标识，路由查询只返回布尔值，主流程不返回日志结果对象；业务日志只记录新接管和异常。精简后通过 20 个封闭网络场景验证，覆盖健康时静默、接管日志、恢复时停止重试、已有接管路由、写入超时后读回、路由目标冲突、API 失败和公网接管结果；当时类型检查、lint 与 watchdog dry-run 构建通过。验证使用内联脚本模拟所有 fetch，未访问线上 API。
+
+加入业务探针前的 watchdog 双向切换版本通过 40 个封闭网络场景，覆盖三次健康回切、恢复中断、按最新 ID 删除、DELETE 不确定结果、公开验证失败后重新接管、路由冲突及回退时间预算；当时通过 watchdog 类型检查、lint 和 dry-run 构建。本地 workerd 使用当时构建产物通过 6 个 scheduled 场景，另验证了重试等待的 AbortSignal 取消，共 7 项运行时检查。验证只使用临时脚本、虚拟凭证和全量出站替身，未访问线上 API 或部署；无新增仓库测试任务。
+
+此前包含同轮回退的三分钟周期与业务探针版本通过 62 个封闭网络场景，包括健康接口正常但 Feed 失败、空 RSS、HTML 错误页、损坏或截断 XML、正文超时、跨块 UTF-8，以及慢业务请求下的回切与回退预算。正文大小上限已按用户要求移除，验证包含超过 2 MiB 的有效 RSS 完整读取；当时 watchdog 类型检查、lint 与 dry-run 构建通过。移除上限前，本地 workerd 构建产物曾通过 9 个 scheduled 场景和 1 项等待取消检查，并通过冻结锁文件安装和全仓类型检查、lint。验证只使用临时脚本、虚拟凭证和全量出站替身，未部署或修改线上路由。
+
+2026-09-25 按用户决定将 watchdog 简化为每轮最多一次切换：未接管时检查主域名，接管时检查固定源站，修改路由并读回后结束，移除同轮回退和整轮时间预算。当时单业务探针版本通过 34 个封闭网络场景，覆盖主域名业务失败、两次确认、下一轮重新接管、最新 Route ID、POST/DELETE 不确定结果、读回失败不追加写入、来源异常，以及探测和 API 正文读取超时；watchdog 类型检查、lint 与 dry-run 构建通过。验证使用临时脚本、虚拟凭证和全量 fetch 替身，缩短计时器以验证取消行为；未新增仓库测试文件、部署或修改线上路由。
+
+随后将业务探针配置改为 `FEED_PATHS` 数组，增加 `/github/issue/DIYgod/RSSHub`；健康接口通过后并行检查全部 Feed，全部成功才算健康，共用单次探测的 30 秒截止时间。当前版本通过 19 个隔离场景，包括第二路由失败阻止恢复或触发接管、并行启动、共享超时、失败后等待其他请求结束，以及追加第三路由；类型检查、lint 与 dry-run 构建通过。只读访问主域名的新路由返回 HTTP 200，RSS 含 58 篇有效文章；这只证明该次请求可用，未部署 watchdog 或修改线上路由。
+
+原业务回归测试文件及测试任务已移除；以下保留删除前已经完成的验证记录。
 
 - Redis SDK 按需加载调整后，在 Node 26.8.2 下通过 `pnpm typecheck`、`pnpm lint`、8 项回归验证、完整构建及生成配置的 Wrangler 部署 dry-run。当时使用实际分包产物、本地 workerd 和 TCP Redis 替身，验证首页可用、有效 ingest 不加载 SDK，首次并发上游查询才加载一次 SDK 并完成 `GET worker:instances`；产物静态依赖不含 Redis SDK，发布保留独立模块。Worker 类型已重新生成；未部署到线上，未测量线上启动耗时或 CPU 收益。
 - 拆包后在 Node 26.8.2 下通过 `pnpm typecheck`、`pnpm lint`、7 项回归验证及 `pnpm build`；Worker 类型重新生成。当时的验证覆盖缓存隔离与并发读取、刷新与 HTTP 共用状态、代理行为、Redis key/TTL 以及两端 ingest 边界。
@@ -144,16 +158,16 @@ Vite 开发改动已通过四个项目的类型检查、lint、Worker/首页构�
 
 用户确认云下服务已经在线上运行良好，并通过各类 Dashboard 完成检查。按此确认关闭本次迁移和切流后的验收，不再要求补做回源、缓存、Redis、指标等专项验收；前述 HTTP/API 检查保留为各次检查的实际记录。
 
-用户决定不安排独立的 Node → Worker → Node 恢复演练。后续由独立探活 Worker 自动接管，人工也可通过 GitHub Actions flow 手动接管或恢复；两种方式遵循同一套 catch-all 切换约定，恢复保持手动。
+用户决定不安排独立的 Node → Worker → Node 恢复演练。2026-09-24 进一步决定由独立探活 Worker 自动接管和恢复；维护时仍可停用 watchdog 后人工接管或恢复，两种方式遵循同一套 catch-all 切换约定。
 
 ## 后续工作
 
 | 事项 | 状态与安排 |
 | --- | --- |
 | 迁移与线上验收 | 已完成，依据 2026-09-23 用户对线上运行及 Dashboard 核验的确认。 |
-| 恢复演练 | 按用户决定不再安排，接管与恢复纳入后续 Actions flow。 |
-| 自动接管 | 待实现独立探活 Worker，检测云下异常后自动接管，创建或确认约定的 catch-all。 |
-| 手动切换 | 待实现接管和恢复两个 Actions 工作流，人工可主动接管或恢复 Node；恢复不自动触发。 |
-| 发布与回滚 | 已有 [Node image 工作流](../../.github/workflows/node-image.yml)，GHCR ARM64 镜像已在 Oracle 运行。后续发布结合手动接管／恢复 Actions 执行，更新及回滚记录实际镜像 digest；使用方式见 [Node 镜像 CI](../../README.md#node-镜像-ci)。 |
+| 恢复演练 | 按用户决定不再安排，日常故障和恢复由 watchdog 自动处理。 |
+| 自动接管与恢复 | `apps/watchdog` 每 3 分钟执行一次，未接管时检查主域名，接管时检查固定源站；先检查 `/healthz`，再并行检查 `FEED_PATHS` 中的 `/openai/news` 和 `/github/issue/DIYgod/RSSHub`，全部通过才算健康。同轮两次失败接管、两次健康恢复；单次完整探测共用 30 秒，重试间隔 10 秒，每轮最多修改一次路由，读回后结束，业务异常留到下一轮处理；尚未部署。部署即启用，删除 watchdog 即停用；部署前先发布两端 `/healthz` 来源标识，再配置 zone 和 Routes token，删除后重建需重新注入 token。 |
+| 手动切换 | 待实现维护用的接管和恢复两个 Actions 工作流；需要保持人工选择时，先停用 watchdog 并确认在途执行结束。 |
+| 发布与回滚 | 已有 [Origin image 工作流](../../.github/workflows/origin-image.yml)，GHCR ARM64 镜像已在 Oracle 运行。发布时先停用 watchdog 并手动接管，验证新 Node 后重新启用自动恢复；更新及回滚记录实际镜像 digest，使用方式见 [Origin 镜像 CI](../../README.md#origin-镜像-ci)。 |
 
-下一步实现 Actions 手动接管／恢复流程和探活 Worker 自动接管，具体约定见[后续自动化](./migration-failover-runbook.md#后续自动化)。当前仓库只有 Node 镜像发布工作流，自动探活 Worker 与接管／恢复 Actions 尚未实现。
+下一步部署启用探活 Worker，并实现 Actions 手动接管／恢复流程，具体约定见[后续自动化](./migration-failover-runbook.md#后续自动化)。当前仓库只有 Node 镜像发布工作流，接管／恢复 Actions 尚未实现；探活 Worker 有独立的构建、类型生成和发布命令。

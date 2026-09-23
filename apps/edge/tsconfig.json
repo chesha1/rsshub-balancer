@@ -4,7 +4,7 @@
     "composite": true,
     "noEmit": true,
     "types": ["node"],
-    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/worker.tsbuildinfo"
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/edge.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "vite.config.ts", "worker-configuration.d.ts"]
 }

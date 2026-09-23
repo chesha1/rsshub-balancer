@@ -1,0 +1,27 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rsshub-balancer-watchdog",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-23",
+  "compatibility_flags": ["global_fetch_strictly_public"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    // 部署即启用自动接管与恢复；部署前填写 zone ID，并确认两端健康接口带来源标识。
+    "CLOUDFLARE_ZONE_ID": "462c224b793ff779c46477ff2b340cd0"
+  },
+  "secrets": {
+    "required": ["CLOUDFLARE_ROUTES_API_TOKEN"]
+  },
+  "triggers": {
+    "crons": ["*/3 * * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
+  }
+}
