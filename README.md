@@ -55,7 +55,7 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 流量数据来自 Workers Analytics Engine，只记录来源国家/地区和最终上游，用于观察请求从哪里进入、由哪些实例承接。
 
-首页桑基图当前展示 `country -> upstream`，保留维度复选框和按可见列绘图的逻辑，请求数使用平台采样权重求和。双字段格式和配套首页已部署，写入与查询使用新数据集 `rsshub_balancer_request_flows`，与旧格式数据隔离。Node 已部署，主域名于 2026-09-22 完成首次切流；2026-09-23 公开指标查询已返回最近 24 小时的数据，用户也已通过各类 Dashboard 确认线上运行良好、验收完成，记录见[实施状态](docs/worker-migration/implementation-status.md)。字段约定见 [Metrics 查询](docs/metrics.md)，后续维度见 [丰富桑基图字段](docs/todo.md#丰富桑基图字段)。
+首页桑基图展示 `country -> upstream`，请求数使用平台采样权重求和；写入与查询使用数据集 `rsshub_balancer_request_flows`。字段约定见 [Metrics 查询](docs/metrics.md)，后续维度见 [丰富桑基图字段](docs/todo.md#丰富桑基图字段)。
 
 ### RSSHub 接口兼容范围
 
@@ -73,19 +73,21 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 ## 项目边界
 
-`rsshub-balancer` 只面向 RSSHub 场景做轻量 HTTP L7 路由、缓存感知转发、请求合并和简单失败兜底。它不会扩展成完整的软件负载均衡器，也不计划支持通用反向代理、L4 代理、复杂权重调度、通用主动健康检查控制面或长期连接管理。云下迁移及线上验收已完成；独立探活 Worker 已实现自动接管和恢复，待部署启用，不引入 DO。后续 GitHub Actions flow 用于维护时的手动接管／恢复。进度见[实施状态](docs/worker-migration/implementation-status.md)。
+`rsshub-balancer` 只面向 RSSHub 场景做轻量 HTTP L7 路由、缓存感知转发、请求合并和简单失败兜底。它不会扩展成完整的软件负载均衡器，也不计划支持通用反向代理、L4 代理、复杂权重调度、通用主动健康检查控制面或长期连接管理。云下迁移及线上验收已完成，日常 RSS 由 Node 承接，Worker 保留备用。
 
 更完整的边界说明见 [docs/capability-boundary.md](docs/capability-boundary.md)。
 
 ## 相关文档
 
 - [Metrics 查询](docs/metrics.md)
-- [云下迁移方案](docs/worker-migration/README.md)
-- [迁移实施状态与本地运行](docs/worker-migration/implementation-status.md)
-- [迁移与故障接管操作手册](docs/worker-migration/migration-failover-runbook.md)
 - [Redis](docs/redis.md)
 - [项目能力边界](docs/capability-boundary.md)
-- [云下完整 LB 分流计划](docs/origin-plane-split-plan.md)
+
+## 运行与接管
+
+主域名 `rsshub-balancer.virworks.moe` 的 RSS 和业务查询经 Cloudflare 橙云、Traefik 到 Node；Worker 固定承接首页、静态资源和精确的 `POST /_internal/metrics/ingest`。长期 Worker Routes 为 `/`、`/_assets/*`、`/_internal/metrics/ingest`，均绑定 `rsshub-balancer`。故障接管时增加 `rsshub-balancer.virworks.moe/* -> rsshub-balancer`，恢复时只删除这条 catch-all；固定 Node 验证入口是 `rsshub-balancer-origin.virworks.moe`。Routes 在 Cloudflare zone 管理，不由 Wrangler 部署配置管理。
+
+独立 [watchdog](apps/watchdog/) 启用后每 3 分钟检查当前入口的 `/healthz` 和业务 Feed，连续两次失败时接管，固定 Node 入口连续两次健康时恢复；每轮最多修改一次 Route，并读回结果。人工发布 Node 前，若 watchdog 已启用，先停用并确认在途执行结束；再接管至 Worker，核对主域名，更新并验证 Node，最后恢复并核对主域名。新版本失败时保留 Worker 接管，按旧镜像 digest 回滚 Node。删除 watchdog 不会移除已经创建的接管 Route；首次部署或删除后重建时，Routes API token 需从 `apps/watchdog/.dev.vars` 使用 Wrangler `--secrets-file` 注入。
 
 ## 开发
 
@@ -119,7 +121,7 @@ pnpm run deploy:edge
 
 开发命令和 `start:origin` 使用独立执行器进程并关闭 Nx 的任务环境文件加载，避免根目录环境文件抢先覆盖应用配置；环境文件由应用自己的 Vite/Cloudflare 插件或 Node 读取。
 
-Worker 入口为 [edge/src/index.ts](apps/edge/src/index.ts)，Node 开发和构建入口均为 [origin/src/index.ts](apps/origin/src/index.ts)，共用 [server-core/src/app.ts](packages/server-core/src/app.ts) 中的 Hono 路由与 `hono/proxy` 转发。两端各自的 `src/app.ts` 配置存储和指标实现，并挂载共享路由。Node 入口读取配置并刷新上游后，通过 `@hono/node-server` 的 `serve({ fetch: app.fetch, ... })` 监听请求，使用库默认的 Request/Response 实现。代理范围与压缩行为见 [HTTP 约定](docs/worker-migration/shared-code-runtime-plan.md#http-与验证)。Worker secrets 按 Wrangler 默认规则放在 `apps/edge/.dev.vars`。
+Worker 入口为 [edge/src/index.ts](apps/edge/src/index.ts)，Node 开发和构建入口均为 [origin/src/index.ts](apps/origin/src/index.ts)，共用 [server-core/src/app.ts](packages/server-core/src/app.ts) 中的 Hono 路由与 `hono/proxy` 转发。两端各自的 `src/app.ts` 配置存储和指标实现，并挂载共享路由。Node 入口读取配置并刷新上游后，通过 `@hono/node-server` 的 `serve({ fetch: app.fetch, ... })` 监听请求，使用库默认的 Request/Response 实现。Worker secrets 按 Wrangler 默认规则放在 `apps/edge/.dev.vars`。
 
 Node 本地开发使用 `apps/origin/.env`，从 [apps/origin/.env.example](apps/origin/.env.example) 复制后填写。`pnpm build:origin` 通过 [vite.config.ts](apps/origin/vite.config.ts) 将 Node 入口及依赖打包为独立 ESM 产物 `dist/apps/origin/index.js`，`pnpm start:origin` 启动。开发、构建与运行统一使用 Node 26（`26.x`），容器构建和运行使用 `node:26-bookworm-slim`。
 
@@ -129,16 +131,14 @@ Node 本地开发使用 `apps/origin/.env`，从 [apps/origin/.env.example](apps
 
 `pnpm build:edge` 先构建首页，再通过 [Worker Vite 配置](apps/edge/vite.config.ts) 和官方 Cloudflare 插件生成 `dist/apps/edge/server/index.js`、独立 Redis SDK 模块及 `public/` 静态资源。Worker 开启 `new_module_registry`，首次访问 Redis 时才导入 SDK，ingest 不加载它；模块缓存不会复用 Redis 连接。`pnpm deploy:edge`（兼容命令 `pnpm deploy`）先构建，再使用生成的 `server/wrangler.json` 发布，保留 `no_bundle` 和模块规则，避免再次合包；Worker 与首页仍一起发布。
 
-Node 收到终止信号后直接退出，允许中断未完成请求并丢失未上传指标。Docker 运行时使用 `--init`，Compose 设置 `init: true`，由轻量 init 转发信号，避免 Node 直接作为 PID 1 忽略停止信号。日常发布先由 Worker 接管，见[发布与回滚](docs/worker-migration/migration-failover-runbook.md#发布与回滚)。部署配置和未实施项目见 [迁移实施状态](docs/worker-migration/implementation-status.md)。
-
-独立探活应用位于 [apps/watchdog](apps/watchdog/)，每 3 分钟执行一次。未接管时检查主域名，Worker 接管时检查固定 Node 入口；每次先检查 `/healthz` 的状态和应用标识，再并行 GET `/openai/news` 与 `/github/issue/DIYgod/RSSHub`，要求所有路由都返回合法且包含文章的 RSS。健康接口与全部业务请求共用 30 秒上限，新增探针只需修改 [config.ts](apps/watchdog/src/config.ts) 中的 `FEED_PATHS`。主域名连续两次失败时建立 Worker catch-all，接管中固定 Node 连续两次健康后删除 catch-all；每轮最多修改一次路由，读回确认后结束，切换后的业务异常由下一轮检查处理。计数只存在本轮，重试间隔 10 秒，不再分配整轮时间预算。使用 `pnpm build:watchdog` 和 `pnpm deploy:watchdog` 独立构建及发布；部署即启用，删除 watchdog 即停用，已创建的接管 Route 保留。维护期间需要保持 Worker 接管时先停用 watchdog，并确认在途执行结束。首次部署、删除后重建时的凭证注入及停用命令见[自动接管与恢复](docs/worker-migration/migration-failover-runbook.md#后续自动化)。
+Node 收到终止信号后直接退出，允许中断未完成请求并丢失未上传指标。Docker 运行时使用 `--init`，Compose 设置 `init: true`，由轻量 init 转发信号，避免 Node 直接作为 PID 1 忽略停止信号。发布时的切换顺序见[运行与接管](#运行与接管)。
 
 ### Origin 镜像 CI
 
-[Origin image 工作流](.github/workflows/origin-image.yml) 仅在向 `main` 推送 Node 相关变更时触发：Node 应用、共享后端、workspace 依赖清单、锁文件及构建/检查配置。仅修改 edge、watchdog 或 web 源码、迁移文档不会触发；修改它们的 `package.json` 或公共锁文件会触发，因为 Docker 安装依赖会读取这些文件。
+[Origin image 工作流](.github/workflows/origin-image.yml) 仅在向 `main` 推送 Node 相关变更时触发：Node 应用、共享后端、workspace 依赖清单、锁文件及构建/检查配置。仅修改 edge、watchdog 或 web 源码及文档不会触发；修改它们的 `package.json` 或公共锁文件会触发，因为 Docker 安装依赖会读取这些文件。
 
 CI 先执行 Node 与共享后端的类型检查和 lint，通过后使用现有 Dockerfile 构建 `linux/amd64`、`linux/arm64` 镜像并推送到 `ghcr.io/chesha1/rsshub-balancer`，生成 `sha-<完整提交 SHA>` 和 `latest` 标签。PR 不触发工作流，也不提供手动触发入口。
 
 发布使用 GitHub 自动提供的 `GITHUB_TOKEN` 和工作流声明的 `packages: write`，无需另配仓库推送密码。首次发布后检查 GHCR 包的可见性：公开包可匿名拉取，私有包需要服务器使用有 `read:packages` 权限的凭据登录。具体依据见 [GitHub 容器仓库文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-成功发布的 Actions 摘要会列出版本标签及 `ghcr.io/chesha1/rsshub-balancer@sha256:...`。部署优先记录并使用 digest；同一提交重跑可能因 Node/pnpm 大版本内更新产生不同镜像，SHA 标签仍可能被覆盖。CI 不清理历史镜像，保留正在使用和回滚所需的 digest。服务器更新按[发布与回滚](docs/worker-migration/migration-failover-runbook.md#发布与回滚)手动执行。
+成功发布的 Actions 摘要会列出版本标签及 `ghcr.io/chesha1/rsshub-balancer@sha256:...`。部署优先记录并使用 digest；同一提交重跑可能因 Node/pnpm 大版本内更新产生不同镜像，SHA 标签仍可能被覆盖。CI 不清理历史镜像，保留正在使用和回滚所需的 digest。服务器更新按[运行与接管](#运行与接管)手动执行。

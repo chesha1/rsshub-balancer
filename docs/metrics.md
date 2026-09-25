@@ -1,8 +1,8 @@
 # Metrics 查询
 
-入口请求统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_request_flows`，只保存来源国家/地区和最终上游。Worker 直接写 binding，Node 将 `{ events: [...] }` 批量上传到 Worker 的 `POST /_internal/metrics/ingest`；每个事件只含 `country`、`upstream`。回传与启用约定见[指标回传](./worker-migration/sankey-analytics-engine-ingestion-plan.md)，部署进度见[实施状态](./worker-migration/implementation-status.md)。
+入口请求统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_request_flows`，只保存来源国家/地区和最终上游。Worker 直接写 binding，Node 将 `{ events: [...] }` 批量上传到 Worker 的 `POST /_internal/metrics/ingest`；每个事件只含 `country`、`upstream`。ingest 依赖 Cloudflare WAF 将访问限制为服务器出口 IP，不使用应用层 token。
 
-当前格式从 `blob1` 重新排列，不保留旧列位置、版本号或旧数据查询逻辑。使用新数据集与旧格式数据隔离，并配套发布写入端、查询端和首页；新图表从新请求开始积累。Worker binding 名称仍为 `METRICS`，指向 `rsshub_balancer_request_flows`；平台会在首次写入时自动创建数据集，见[官方说明](https://developers.cloudflare.com/analytics/analytics-engine/get-started/#1-name-your-dataset-and-add-it-to-your-worker)。
+Worker binding `METRICS` 与查询表名均指向 `rsshub_balancer_request_flows`；写入、查询和首页使用同一字段格式。平台会在首次写入时自动创建数据集，见[官方说明](https://developers.cloudflare.com/analytics/analytics-engine/get-started/#1-name-your-dataset-and-add-it-to-your-worker)。
 
 ## 记录范围与字段
 
