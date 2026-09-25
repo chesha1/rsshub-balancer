@@ -1,5 +1,5 @@
 import { createClient, type RedisClientType } from '@redis/client'
-import { errorProps, redisLogger } from '@rsshub-balancer/server-core/log'
+import { redisLogger } from '@rsshub-balancer/server-core/log'
 
 const REDIS_TIMEOUT_MS = 2000
 
@@ -43,7 +43,7 @@ class NodeRedisConnection {
       redisLogger.warn('redis client emitted an error', {
         event: 'redis.client',
         outcome: 'error',
-        ...errorProps(error),
+        error,
       })
       // 命令错误不等于断线；SDK 已确认不再 ready 时才影响其他在途命令。
       if (this.phase !== 'connecting' && !client.isReady) {
@@ -84,7 +84,7 @@ class NodeRedisConnection {
       redisLogger.warn('redis connect failed', {
         event: 'redis.connect',
         outcome: error instanceof RedisTimeoutError ? 'timed_out' : 'failed',
-        ...errorProps(error),
+        error,
       })
       throw error
     } finally {
@@ -134,7 +134,7 @@ class NodeRedisConnection {
           outcome: 'timed_out',
           operation,
           durationMs: Date.now() - startedAtMs,
-          ...errorProps(error),
+          error,
         })
         // 在途集合仍保留底层命令，直到它真正结束或最晚原始截止时间到期。
         this.drain()
@@ -175,7 +175,7 @@ class NodeRedisConnection {
         event: 'redis.command',
         outcome: 'failed',
         operation,
-        ...errorProps(error),
+        error,
       })
       if (!this.client.isReady) this.destroy('disconnected')
     } finally {
@@ -231,7 +231,7 @@ class NodeRedisConnection {
       redisLogger.warn('redis client destroy failed', {
         event: 'redis.client',
         outcome: 'destroy_failed',
-        ...errorProps(error),
+        error,
       })
     }
   }

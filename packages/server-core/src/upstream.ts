@@ -1,6 +1,6 @@
 import { proxy } from 'hono/proxy'
 import { config } from './config'
-import { errorProps, upstreamLogger, withRequestId } from './log'
+import { upstreamLogger, withRequestId } from './log'
 import * as redis from './redis'
 import { shuffle, trimSlash } from './utils'
 
@@ -109,7 +109,7 @@ function ensureInstancesRefresh(): Promise<string[] | undefined> {
             : undefined,
           refreshIntervalSeconds: config.instancesRefreshIntervalSeconds,
           refreshDurationMs: Date.now() - startedAt,
-          ...errorProps(e),
+          error: e,
         },
       )
       return undefined
@@ -151,7 +151,7 @@ async function markFailedUpstream(
       upstream,
       pathname,
       ttlSeconds,
-      ...errorProps(e),
+      error: e,
     })
   }
 }
@@ -379,7 +379,7 @@ export async function fetchFromUpstream(
       selectedUpstreamHost,
       finalUpstreamHost,
       fallbackUsed: fallbackAttemptCount > 0,
-      ...errorProps(e),
+      error: e,
     })
     return {
       response: new Response('Internal error', {

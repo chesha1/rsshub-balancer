@@ -1,5 +1,5 @@
 import { type Context, Hono } from 'hono'
-import { errorProps, httpLogger } from '../log'
+import { httpLogger } from '../log'
 import * as upstream from '../upstream'
 
 type TrafficSankeyRow = {
@@ -59,7 +59,7 @@ async function handleInternalUpstreams(c: Context) {
     httpLogger.warn('public upstream list request failed', {
       event: 'internal.upstreams',
       outcome: 'failed',
-      ...errorProps(e),
+      error: e,
     })
     return c.json({ error: 'internal_error' }, 500)
   }
@@ -120,7 +120,7 @@ async function handleTrafficSankey(c: Context) {
     httpLogger.warn('analytics sankey request failed', {
       event: 'internal.metrics.country_colo_sankey',
       outcome: 'failed',
-      ...errorProps(e),
+      error: e,
     })
     return c.json({ error: 'internal_error' }, 500)
   }

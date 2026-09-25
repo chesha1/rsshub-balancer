@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   configureSync,
   getConsoleSink,
+  getJsonLinesFormatter,
   getLogger,
   type LogRecord,
   withContext,
@@ -17,86 +18,32 @@ type RequestLogContext = {
   requestPath: string
 }
 
-// 仅把 Error 规范化为结构化日志友好的对象，保留 message/name/stack，
-// 并递归展开 cause 与 AggregateError.errors；其它值交给调用方原样处理。
-function normalizeError(
-  error: Error,
-  seen = new WeakSet<Error>(),
-): Record<string, unknown> {
-  if (seen.has(error)) {
-    return {
-      error: error.message,
-      errorName: error.name,
-      circular: true,
-    }
-  }
-  seen.add(error)
+const jsonLinesFormatter = getJsonLinesFormatter()
 
-  const normalized: Record<string, unknown> = {
-    error: error.message,
-    errorName: error.name,
-  }
-  if (typeof error.stack === 'string') normalized.stack = error.stack
-
-  const cause = (error as Error & { cause?: unknown }).cause
-  if (cause !== undefined) {
-    normalized.cause =
-      cause instanceof Error ? normalizeError(cause, seen) : cause
-  }
-  if (error instanceof AggregateError) {
-    normalized.errors = error.errors.map((item) =>
-      item instanceof Error ? normalizeError(item, seen) : item,
-    )
-  }
-
-  for (const [key, value] of Object.entries(error)) {
-    if (!(key in normalized)) {
-      normalized[key] =
-        value instanceof Error ? normalizeError(value, seen) : value
-    }
-  }
-
-  return normalized
-}
-
-// 将单个日志片段规范化为可序列化文本，错误对象沿用统一字段。
-function formatMessagePart(part: unknown): string {
-  if (typeof part === 'string') return part
+// 异常值无法转为 JSON 时仍用 LogTape 输出一条简短诊断，避免丢失整条日志。
+function formatLogRecord(record: LogRecord): string {
   try {
-    return JSON.stringify(part instanceof Error ? normalizeError(part) : part)
+    return jsonLinesFormatter(record)
   } catch {
-    return String(part)
-  }
-}
-
-// 保留日志库消息片段的原始顺序，组合成一条 JSON 日志中的 message。
-function formatMessage(parts: readonly unknown[]): string {
-  return parts.map(formatMessagePart).join('')
-}
-
-// 耗时字段统一约定：
-// 1. `durationMs` 只表示当前日志事件范围内的总墙钟耗时；
-// 2. 分阶段耗时统一命名为 `{phase}DurationMs`；
-// 3. 未进入的阶段不写 `0`，而是直接省略对应字段。
-// 两端使用同一份精简 JSON，方便直接查看 console 输出。
-function formatRecord(record: LogRecord): Record<string, unknown> {
-  return {
-    timestamp: new Date(record.timestamp).toISOString(),
-    level: record.level,
-    category: record.category.join('.'),
-    message: formatMessage(record.message),
-    ...record.properties,
+    return jsonLinesFormatter({
+      category: record.category,
+      level: record.level,
+      message: ['log record serialization failed'],
+      rawMessage: 'log record serialization failed',
+      timestamp: record.timestamp,
+      properties: { serializationFailed: true },
+    })
   }
 }
 
 const logContextStorage = new AsyncLocalStorage<Record<string, unknown>>()
 
-// 共用一套 console sink，只在实际输出警告或错误时序列化，不需要入口初始化。
+// 两端共用 JSON Lines console sink，只在实际输出警告或错误时序列化。
 configureSync({
   contextLocalStorage: logContextStorage,
   sinks: {
     console: getConsoleSink({
-      formatter: (record) => [JSON.stringify(formatRecord(record))],
+      formatter: formatLogRecord,
     }),
   },
   loggers: [
@@ -115,7 +62,8 @@ configureSync({
 
 const rootLogger = getLogger(['rsshub-balancer'])
 
-// 按模块拆分类别，方便后续在 Cloudflare 里按 category 过滤。
+// 日志属性中的 durationMs 表示事件总墙钟耗时，分阶段耗时用 {phase}DurationMs，未进入的阶段省略。
+// 按模块拆分类别，JSON 日志用 logger 字段区分。
 export const httpLogger = rootLogger.getChild('http')
 export const upstreamLogger = rootLogger.getChild('upstream')
 export const metricsLogger = rootLogger.getChild('metrics')
@@ -153,19 +101,4 @@ export function withRequestId(
 // 从请求头中读取链路关联 ID，供需要显式传递的调用方使用。
 export function getRequestId(request: Request): string | null {
   return request.headers.get(REQUEST_ID_HEADER)
-}
-
-// Error 提取核心字段，其它值尽量原样保留给结构化日志系统处理。
-export function errorProps(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return normalizeError(error)
-  }
-  return {
-    error:
-      typeof error === 'bigint' ||
-      typeof error === 'symbol' ||
-      typeof error === 'function'
-        ? String(error)
-        : error,
-  }
 }

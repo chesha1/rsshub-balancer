@@ -1,5 +1,5 @@
 import { config } from './config'
-import { cronLogger, errorProps } from './log'
+import { cronLogger } from './log'
 import * as redis from './redis'
 import * as upstream from './upstream'
 import { trimSlash } from './utils'
@@ -68,7 +68,7 @@ export async function scheduled(): Promise<void> {
       outcome: 'retain_existing',
       previousCount: previous.length,
       durationMs: Date.now() - startedAt,
-      ...errorProps(e),
+      error: e,
     })
   }
 }

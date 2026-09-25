@@ -1,5 +1,5 @@
 import type { RedisClientType } from '@redis/client'
-import { errorProps, redisLogger } from '@rsshub-balancer/server-core/log'
+import { redisLogger } from '@rsshub-balancer/server-core/log'
 
 const REDIS_TIMEOUT_MS = 2000
 
@@ -47,7 +47,7 @@ export async function runRedisCommand<T>(
     redisLogger.warn('redis operation failed', {
       event: 'redis.command',
       operation,
-      ...errorProps(error),
+      error,
     })
     throw error
   } finally {

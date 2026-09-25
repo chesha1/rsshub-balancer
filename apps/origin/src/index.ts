@@ -1,7 +1,7 @@
 import { once } from 'node:events'
 import { serve } from '@hono/node-server'
 import { scheduled } from '@rsshub-balancer/server-core'
-import { errorProps, runtimeLogger } from '@rsshub-balancer/server-core/log'
+import { runtimeLogger } from '@rsshub-balancer/server-core/log'
 import { app } from './app'
 import { registerRuntimeWarningLogger } from './log'
 import { startMetricsUpload } from './metrics'
@@ -30,7 +30,7 @@ try {
   // 启动错误以结构化日志报告，退出非零供调用方识别。
   runtimeLogger.error('node startup failed', {
     event: 'runtime.startup',
-    ...errorProps(error),
+    error,
   })
   process.exit(1)
 }
