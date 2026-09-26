@@ -2,7 +2,7 @@ import { config } from './config'
 import { cronLogger } from './log'
 import * as redis from './redis'
 import * as upstream from './upstream'
-import { trimSlash } from './utils'
+import { cancelResponseBody, trimSlash } from './utils'
 
 // 定时刷新远程 RSSHub 实例列表，健康检查通过后写入 Redis 和本地缓存。
 export async function scheduled(): Promise<void> {
@@ -25,8 +25,12 @@ export async function scheduled(): Promise<void> {
             signal: AbortSignal.timeout(5000),
             redirect: 'manual',
           })
+          if (!res.ok) {
+            await cancelResponseBody(res)
+            return false
+          }
           // 读取正文也受同一个超时信号约束，避免把返回 2xx 的失效站点当作健康实例。
-          return res.ok && (await res.text()) === 'ok'
+          return (await res.text()) === 'ok'
         } catch {
           return false
         }

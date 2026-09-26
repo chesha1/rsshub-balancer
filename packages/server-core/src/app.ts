@@ -3,6 +3,7 @@ import { proxy } from 'hono/proxy'
 import * as metrics from './metrics'
 import { internalRoutes } from './routes/internal'
 import * as upstream from './upstream'
+import { cancelResponseBody } from './utils'
 
 // 统一注册一批明确不对外提供的路由，避免下面散落多条重复的 notFound 声明。
 const notFoundRoutes = [
@@ -31,7 +32,10 @@ routes.get('/healthz', async (c) => {
         const res = await fetch(`${u}/healthz`, {
           signal: AbortSignal.timeout(5000),
         })
-        if (!res.ok) throw new Error(`${res.status}`)
+        if (!res.ok) {
+          await cancelResponseBody(res)
+          throw new Error(`${res.status}`)
+        }
         // 与定时筛选保持一致，只有健康端点返回明确的 ok 正文才算可用。
         if ((await res.text()) !== 'ok')
           throw new Error('Invalid health response')
@@ -53,17 +57,23 @@ routes.get('/api/route/status', async (c) => {
 
   const upstreams = await upstream.getUpstreams()
   try {
-    const response = await Promise.any(
+    let hasWinner = false
+    return await Promise.any(
       upstreams.map(async (upstream) => {
         const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
         const res = await proxy(statusUrl, {
           signal: AbortSignal.timeout(5000),
         })
-        if (res.status === 200) return res
+        // 在任何 await 之前确定唯一获胜者，避免同时成功的多个响应都保留正文。
+        if (res.status === 200 && !hasWinner) {
+          hasWinner = true
+          return res
+        }
+        // 已返回的失败响应和多余成功响应不再转发，立即释放正文。
+        await cancelResponseBody(res)
         throw new Error(`${res.status}`)
       }),
     )
-    return response
   } catch {
     return c.json({ cached: false, lastBuildDate: null }, 404)
   }

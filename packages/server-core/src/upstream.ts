@@ -2,7 +2,7 @@ import { proxy } from 'hono/proxy'
 import { config } from './config'
 import { upstreamLogger, withRequestId } from './log'
 import * as redis from './redis'
-import { shuffle, trimSlash } from './utils'
+import { cancelResponseBody, shuffle, trimSlash } from './utils'
 
 // `forward` 表示当前尝试正好命中了缓存探测选出的上游；
 // `fallback` 表示没有命中缓存，或命中的上游失败后进入兜底重试。
@@ -40,6 +40,7 @@ export async function fetchRemoteInstances(): Promise<string[]> {
     { signal: AbortSignal.timeout(15000) },
   )
   if (!res.ok) {
+    await cancelResponseBody(res)
     throw new Error(`fetch instances failed: ${res.status}`)
   }
   const text = await res.text()
@@ -231,6 +232,8 @@ export async function fetchFromUpstream(
         const check = await fetch(statusUrl, {
           signal: AbortSignal.timeout(1000),
         })
+        // 探测只用状态码，命中与未命中的正文都不进入后续转发。
+        await cancelResponseBody(check)
         return check.status === 200 ? upstream : undefined
       }),
     )
@@ -319,6 +322,8 @@ export async function fetchFromUpstream(
             upstream: finalUpstreamHost,
           }
         }
+        // 失败响应不会转发，先释放正文再标记失败并尝试下一个上游。
+        await cancelResponseBody(res)
       } catch {}
       // 仅在当前路由尚未标记该上游失败时才写入，减少重复 Redis 写入。
       if (!failedUpstreams.has(upstream)) {

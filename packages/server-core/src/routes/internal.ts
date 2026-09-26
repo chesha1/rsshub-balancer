@@ -1,6 +1,7 @@
 import { type Context, Hono } from 'hono'
 import { httpLogger } from '../log'
 import * as upstream from '../upstream'
+import { cancelResponseBody } from '../utils'
 
 type TrafficSankeyRow = {
   country: string
@@ -105,6 +106,7 @@ async function handleTrafficSankey(c: Context) {
       },
     )
     if (!response.ok) {
+      await cancelResponseBody(response)
       throw new Error(`analytics query failed: ${response.status}`)
     }
 
