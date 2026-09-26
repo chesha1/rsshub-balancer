@@ -223,27 +223,33 @@ export async function fetchFromUpstream(
     probeCount = orderedUpstreams.length
     phase = 'cache_probe'
     cacheProbeStartedAt = Date.now()
-    try {
-      selectedUpstreamHost = await Promise.any(
-        orderedUpstreams.map(async (upstream) => {
-          const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
-          const check = await fetch(statusUrl, {
-            signal: AbortSignal.timeout(5000),
-          })
-          if (check.status === 200) return upstream
-          throw new Error(`${check.status}`)
-        }),
-      )
-    } catch {
-      selectedUpstreamHost = undefined
+    // 缓存探测只是选路提示，各自最多等 1 秒，避免慢实例拖住请求；超时实例仍可参与后续请求。
+    // 收齐时限内的结果后再抽样，避免最快响应的实例长期胜出。
+    const probeResults = await Promise.allSettled(
+      orderedUpstreams.map(async (upstream) => {
+        const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
+        const check = await fetch(statusUrl, {
+          signal: AbortSignal.timeout(1000),
+        })
+        return check.status === 200 ? upstream : undefined
+      }),
+    )
+    const hitUpstreams = new Set<string>()
+    for (const result of probeResults) {
+      if (result.status === 'fulfilled' && result.value) {
+        hitUpstreams.add(result.value)
+      }
     }
+    const hits = [...hitUpstreams]
+    selectedUpstreamHost = shuffle(hits)[0]
     cacheProbeDurationMs = Date.now() - cacheProbeStartedAt
     cacheHit = Boolean(selectedUpstreamHost)
-    // 缓存探测阶段只记录“是否命中”以及命中的候选上游，不再按实例逐条展开。
+    // 缓存探测阶段只记录命中数量和抽中的上游，不再按实例逐条展开。
     upstreamLogger.info('upstream cache probe completed', {
       event: 'upstream.cache_probe',
       outcome: cacheHit ? 'hit' : 'miss',
       cacheHit,
+      cacheHitCount: hits.length,
       selectedUpstreamHost,
       probeCount,
       durationMs: cacheProbeDurationMs,
