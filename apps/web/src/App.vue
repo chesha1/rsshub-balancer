@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ChartError from './ChartError.vue'
+import ChartLoading from './ChartLoading.vue'
 import { setAppLocale } from './i18n'
-import TrafficSankeyChart from './TrafficSankeyChart.vue'
 import {
   trafficSankeyResponseSchema,
   type TrafficSankeyRow,
@@ -90,6 +91,14 @@ const upstreamsLoadState = ref<LoadState>('loading')
 const trafficSankeyRows = ref<TrafficSankeyRow[]>([])
 const trafficSankeyLoadState = ref<LoadState>('loading')
 const { t, locale } = useI18n()
+
+const TrafficSankeyChart = defineAsyncComponent({
+  // 只有统计成功且非空时才渲染图表，把图表依赖移出首页启动路径。
+  loader: () => import('./TrafficSankeyChart.vue'),
+  loadingComponent: ChartLoading,
+  errorComponent: ChartError,
+  delay: 0,
+})
 
 const languageButtonLabel = computed(() =>
   locale.value === 'zh-CN' ? 'English' : '中文',

@@ -9,22 +9,6 @@ const localeResources = fileURLToPath(
   new URL('./src/locales/**', import.meta.url),
 )
 
-// 将大型但低频变化的图表依赖拆成独立 chunk，让业务代码改动时更容易复用浏览器缓存。
-function splitVendorChunk(id: string) {
-  const normalizedId = id.replaceAll('\\', '/')
-  if (
-    normalizedId.includes('/node_modules/echarts/') ||
-    normalizedId.includes('/node_modules/zrender/') ||
-    normalizedId.includes('/node_modules/vue-echarts/')
-  ) {
-    return 'chart-vendor'
-  }
-
-  if (normalizedId.includes('/node_modules/')) {
-    return 'vendor'
-  }
-}
-
 export default defineConfig({
   root: appRoot,
   plugins: [
@@ -46,12 +30,5 @@ export default defineConfig({
     outDir: outputDir,
     emptyOutDir: true,
     assetsDir: '_assets',
-    rolldownOptions: {
-      output: {
-        codeSplitting: {
-          groups: [{ name: splitVendorChunk }],
-        },
-      },
-    },
   },
 })
