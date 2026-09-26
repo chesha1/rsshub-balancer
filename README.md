@@ -82,12 +82,15 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 - [Metrics 查询](docs/metrics.md)
 - [Redis](docs/redis.md)
 - [项目能力边界](docs/capability-boundary.md)
+- [Node 源站发布策略](docs/origin-release-strategy.md)
 
 ## 运行与接管
 
 主域名 `rsshub-balancer.virworks.moe` 的 RSS 和业务查询经 Cloudflare 橙云、Traefik 到 Node；Worker 固定承接首页、静态资源和精确的 `POST /_internal/metrics/ingest`。长期 Worker Routes 为 `/`、`/_assets/*`、`/_internal/metrics/ingest`，均绑定 `rsshub-balancer`。故障接管时增加 `rsshub-balancer.virworks.moe/* -> rsshub-balancer`，恢复时只删除这条 catch-all；固定 Node 验证入口是 `rsshub-balancer-origin.virworks.moe`。Routes 在 Cloudflare zone 管理，不由 Wrangler 部署配置管理。
 
-独立 [watchdog](apps/watchdog/) 启用后每 3 分钟检查当前入口的 `/healthz` 和业务 Feed，连续两次失败时接管，固定 Node 入口连续两次健康时恢复；每轮最多修改一次 Route，并读回结果。人工发布 Node 前，若 watchdog 已启用，先停用并确认在途执行结束；再接管至 Worker，核对主域名，更新并验证 Node，最后恢复并核对主域名。新版本失败时保留 Worker 接管，按旧镜像 digest 回滚 Node。删除 watchdog 不会移除已经创建的接管 Route；首次部署或删除后重建时，Routes API token 需从 `apps/watchdog/.dev.vars` 使用 Wrangler `--secrets-file` 注入。
+独立 [watchdog](apps/watchdog/) 启用后每 3 分钟检查当前入口的 `/healthz` 和业务 Feed，连续两次失败时接管，固定 Node 入口连续两次健康时恢复；每轮最多修改一次 Route，并读回结果。删除 watchdog 不会移除已经创建的接管 Route；首次部署或删除后重建时，Routes API token 需从 `apps/watchdog/.dev.vars` 使用 Wrangler `--secrets-file` 注入。
+
+日常更新 Node 镜像直接重建云下单实例，接受短暂断流，不主动切到 Worker。原因和回滚约定见 [Node 源站发布策略](docs/origin-release-strategy.md)。
 
 ## 开发
 
