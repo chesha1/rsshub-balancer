@@ -2,7 +2,7 @@
 import { schemeSet3, schemeTableau10 } from 'd3-scale-chromatic'
 import { SankeyChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
-import { use } from 'echarts/core'
+import { type ECElementEvent, use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import {
   ElCheckbox,
@@ -106,6 +106,35 @@ function formatDimensionValue(column: TrafficSankeyColumn, value: string) {
 function formatNodeName(name: string) {
   const node = parseNodeName(name)
   return formatDimensionValue(node.column, node.value)
+}
+
+// 只允许真实上游的 HTTP(S) 地址跳转，排除占位值和其他维度。
+function getUpstreamUrl(name: string) {
+  const node = parseNodeName(name)
+  if (node.column !== 'upstream') {
+    return undefined
+  }
+
+  try {
+    const url = new URL(node.value)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+      ? url.href
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// 节点和标签共享点击事件，在新标签页打开上游以保留当前图表。
+function openUpstream(params: ECElementEvent) {
+  if (params.seriesType !== 'sankey' || params.dataType !== 'node') {
+    return
+  }
+
+  const url = getUpstreamUrl(params.name)
+  if (url) {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
 }
 
 // 按当前可见列生成一行的路径，新增维度时继续沿用同一绘图流程。
@@ -240,10 +269,13 @@ const chartOption = computed(() => {
           // 单列也使用非零布局深度，避免 ECharts 横向缩放时除以零。
           depth: singleColumn ? 1 : chartData.value.nodeDepths.get(name),
           // 只有最后一列靠近右边缘，标签放到节点左侧才能稳定留在画布内部。
-          label:
-            chartData.value.nodeDepths.get(name) === lastVisibleDepth
-              ? { position: 'left' }
-              : undefined,
+          label: {
+            position:
+              chartData.value.nodeDepths.get(name) === lastVisibleDepth
+                ? 'left'
+                : 'right',
+            color: getUpstreamUrl(name) ? '#0969da' : '#24292f',
+          },
         })),
         links: chartData.value.links,
         draggable: false,
@@ -309,6 +341,7 @@ const chartOption = computed(() => {
       :style="chartStyle"
       autoresize
       role="img"
+      @click="openUpstream"
     />
   </div>
 </template>
