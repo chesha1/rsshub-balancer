@@ -4,7 +4,7 @@
   },
   "hero": {
     "title": "RSSHub Balancer",
-    "summary": "Load balancer for multiple RSSHub instances — reuses cached responses and reduces redundant fetching."
+    "summary": "Load balancer for multiple RSSHub instances — prefers upstream caches and tries other instances when a request fails."
   },
   "usage": {
     "title": "How to Use",
@@ -16,13 +16,13 @@
     "title": "Current Upstreams",
     "introBefore": "Instances below are automatically synced from the ",
     "docsLink": "official RSSHub documentation",
-    "introAfter": ", plus one self-maintained standby instance. This is the candidate list used by the environment currently serving requests.",
+    "introAfter": " and checked regularly for health alongside a self-maintained instance. This is the candidate list used by the environment currently serving requests.",
     "loading": "Loading current upstreams…",
     "error": "The current upstream list is temporarily unavailable."
   },
   "trafficSankey": {
     "title": "Request Flow in the Last 24 Hours",
-    "summary": "Regular proxy requests grouped by source country or region, RSSHub path prefix, and result. Successful requests flow to the upstream that returned a successful response; failed requests share a single Request failed node. Only the first path segment (for example, /github) is recorded; later segments and query strings are excluded. Link widths show request counts.",
+    "summary": "Regular feed proxy requests recorded by the origin and standby environments, grouped by source country or region, RSSHub path prefix, and final result. Each recorded request counts once; retries do not add to the count. Successful requests flow to the responding upstream; failed requests share a single Request failed node. Only the first path segment (for example, /github) is recorded; later segments and query strings are excluded. Link widths show approximate request counts, excluding requests served directly from Cloudflare cache.",
     "loading": "Loading traffic distribution for the last 24 hours…",
     "error": "Traffic distribution for the last 24 hours is temporarily unavailable.",
     "empty": "No traffic distribution data is available for the last 24 hours.",
@@ -41,22 +41,20 @@
   },
   "howItWorks": {
     "title": "How It Works",
-    "introBefore": "This load balancer does ",
-    "introStrong": "not",
-    "introAfter": " impose extra burden on upstream RSSHub instances or the original websites being crawled:",
-    "coalescing": {
-      "title": "Two-level request coalescing",
-      "summary": "— Concurrent requests for the same route first share the same Promise within a Worker isolate, so most duplicate traffic is merged there.",
-      "cost": "Durable Objects were originally used for cross-isolate coalescing, but the current cost is too high: they have triggered two $12.50 charges. After analysis, the extra benefit is small.",
-      "current": "Only about 1% of eligible requests currently attempt to enter the Durable Object; the rest use isolate-level coalescing and direct upstream forwarding."
+    "introBefore": "This load balancer ",
+    "introStrong": "prefers cached content and skips recent failures",
+    "introAfter": " to help reuse existing content and keep feeds available:",
+    "runtime": {
+      "title": "One address with automatic failover",
+      "body": "— The origin normally handles RSS requests, while Cloudflare Workers serves this homepage and takes over subsequent requests after scheduled checks confirm a service failure. Traffic returns to the origin once it recovers and passes the checks. Your feed URLs stay the same."
     },
     "cacheAware": {
       "title": "Cache-aware routing",
-      "body": "— Before making an actual request, the balancer checks all upstream instances in parallel to find one that has already cached the route. The request is then forwarded to the cached instance, which serves its cached content without re-crawling the source website."
+      "body": "— Before forwarding, the balancer checks candidate instances in parallel for a cached copy of the route and randomly selects from any cache hits to help reuse existing content. Upstream RSSHub instances remain responsible for fetching content and updating their caches."
     },
-    "noImpact": {
-      "title": "No impact on original websites",
-      "body": "— Each RSSHub instance maintains its own cache and crawl schedule. This balancer only distributes requests at the RSSHub instance level; it never crawls original websites directly, nor does it alter any instance's crawl frequency."
+    "retry": {
+      "title": "Retries and temporary failure avoidance",
+      "body": "— If an upstream times out or returns an error response, other candidates are tried in sequence. Instances that recently failed for the same path are temporarily skipped. If no candidate is available, the request returns an error."
     }
   },
   "compatibility": {
@@ -70,7 +68,7 @@
     "rows": {
       "feed": {
         "status": "✅ Load balanced",
-        "notes": "Core feed routes, forwarded via two-level request coalescing"
+        "notes": "GET/HEAD supported; prefers upstream caches and tries other candidates on failure"
       },
       "home": {
         "status": "✅ Custom",
@@ -78,11 +76,11 @@
       },
       "healthz": {
         "status": "✅ Custom",
-        "notes": "Aggregated health check across all upstreams"
+        "notes": "Returns ok if at least one current upstream is healthy; otherwise returns 503"
       },
       "robots": {
         "status": "✅ Custom",
-        "notes": "Disallows all search engine indexing"
+        "notes": "Asks search engines not to crawl this site"
       },
       "routeStatus": {
         "status": "✅ Aggregated proxy",
@@ -90,7 +88,7 @@
       },
       "metrics": {
         "status": "🚫 Not public",
-        "notes": "Request sources, RSSHub path prefixes, and results are written to Workers Analytics Engine and queried through the SQL API"
+        "notes": "Returns 404; request flow is shown in the homepage chart for the last 24 hours"
       },
       "openapi": {
         "status": "❌ Unavailable",

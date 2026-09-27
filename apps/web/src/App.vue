@@ -230,18 +230,16 @@ onMounted(async () => {
       </p>
       <ul>
         <li>
-          <strong>{{ t('howItWorks.coalescing.title') }}</strong>
-          {{ t('howItWorks.coalescing.summary') }}
-          {{ t('howItWorks.coalescing.cost') }}
-          {{ t('howItWorks.coalescing.current') }}
+          <strong>{{ t('howItWorks.runtime.title') }}</strong>
+          {{ t('howItWorks.runtime.body') }}
         </li>
         <li>
           <strong>{{ t('howItWorks.cacheAware.title') }}</strong>
           {{ t('howItWorks.cacheAware.body') }}
         </li>
         <li>
-          <strong>{{ t('howItWorks.noImpact.title') }}</strong>
-          {{ t('howItWorks.noImpact.body') }}
+          <strong>{{ t('howItWorks.retry.title') }}</strong>
+          {{ t('howItWorks.retry.body') }}
         </li>
       </ul>
 
