@@ -20,7 +20,11 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     proxy: {
-      '/_internal': 'http://127.0.0.1:8787',
+      // 首页开发统一通过线上内部接口读取真实数据。
+      '/_internal': {
+        target: 'https://rsshub-balancer.virworks.moe',
+        changeOrigin: true,
+      },
       '/api': 'http://127.0.0.1:8787',
       '/healthz': 'http://127.0.0.1:8787',
       '/robots.txt': 'http://127.0.0.1:8787',

@@ -128,7 +128,9 @@ Worker 入口为 [edge/src/index.ts](apps/edge/src/index.ts)，Node 开发和构
 
 Node 本地开发使用 `apps/origin/.env`，从 [apps/origin/.env.example](apps/origin/.env.example) 复制后填写。`pnpm build:origin` 通过 [vite.config.ts](apps/origin/vite.config.ts) 将 Node 入口及依赖打包为独立 ESM 产物 `dist/apps/origin/index.js`，`pnpm start:origin` 启动。开发、构建与运行统一使用 Node 26（`26.x`），容器构建和运行使用 `node:26-bookworm-slim`。
 
-`pnpm dev:edge` 使用 Vite 和官方 Cloudflare 插件开发，监听 `http://127.0.0.1:8787`。配合 `pnpm dev:web` 开发首页时，前端代理连接该地址。Worker 开发先准备首页构建产物，直接访问 `8787` 也能查看构建后的首页。 Worker 源码变化时整体重载业务模块，使一次性配置和模块缓存随代码一起重新初始化。
+`pnpm dev:edge` 使用 Vite 和官方 Cloudflare 插件开发，监听 `http://127.0.0.1:8787`。配合 `pnpm dev:web` 开发首页时，`/api`、`/healthz` 和 `/robots.txt` 的前端代理连接该地址。Worker 开发先准备首页构建产物，直接访问 `8787` 也能查看构建后的首页。 Worker 源码变化时整体重载业务模块，使一次性配置和模块缓存随代码一起重新初始化。
+
+`pnpm dev:web` 将所有 `/_internal` 请求统一代理到线上 `https://rsshub-balancer.virworks.moe`，首页的上游实例列表与桑基图直接使用云端真实数据；开发首页时无需启动本地后端或配置 Cloudflare 查询凭据。此代理仅用于 Vite 开发服务；验证本地内部接口代码时，应直接请求本地后端接口。
 
 插件默认启用 Remote bindings 支持，支持远程连接的具体资源在 `wrangler.jsonc` 中配置 `remote: true`；Worker 代码仍在本机 workerd 执行。当前 `METRICS` 的 Analytics Engine 不支持远程绑定，使用本地模拟；Redis 由 SDK 直连 `apps/edge/.dev.vars` 中的 `VALKEY_URL`。资源支持范围见 [Cloudflare 开发模式支持表](https://developers.cloudflare.com/workers/local-development/bindings-per-env/)。
 
