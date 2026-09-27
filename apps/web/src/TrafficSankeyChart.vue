@@ -16,6 +16,9 @@ import VChart from 'vue-echarts'
 import type { TrafficSankeyRow } from './types'
 
 type TrafficSankeyColumn = 'country' | 'path' | 'upstream'
+type SankeyNodeNamespace = TrafficSankeyColumn | 'other'
+type LimitedSankeyColumn = Exclude<TrafficSankeyColumn, 'upstream'>
+type SankeyTopValues = Record<LimitedSankeyColumn, ReadonlySet<string>>
 
 type SankeyLink = {
   source: string
@@ -79,9 +82,38 @@ const sankeyMinimumChartHeight = 360
 const sankeyNodeGap = 16
 const sankeyNodeSlotHeight = 22
 const sankeyVerticalPadding = 24
+const sankeyDimensionLimit = 30
+
+// 按全部结果的请求量选出头部项，同量时按名称排序，避免刷新后分组抖动。
+function getTopDimensionValues(
+  rows: readonly TrafficSankeyRow[],
+  column: LimitedSankeyColumn,
+) {
+  const totals = new Map<string, number>()
+  for (const row of rows) {
+    if (row.value > 0) {
+      totals.set(row[column], (totals.get(row[column]) ?? 0) + row.value)
+    }
+  }
+
+  return new Set(
+    [...totals]
+      .sort(([nameA, valueA], [nameB, valueB]) =>
+        valueB - valueA || nameA.localeCompare(nameB),
+      )
+      .slice(0, sankeyDimensionLimit)
+      .map(([name]) => name),
+  )
+}
+
+// 分组始终基于完整数据，勾选维度不会改变头部项或任何请求的计数。
+const topDimensionValues = computed<SankeyTopValues>(() => ({
+  country: getTopDimensionValues(props.rows, 'country'),
+  path: getTopDimensionValues(props.rows, 'path'),
+}))
 
 // 给每个维度节点加命名空间，避免不同列中相同文本被 ECharts 合并。
-function createNodeName(column: TrafficSankeyColumn, value: string) {
+function createNodeName(column: SankeyNodeNamespace, value: string) {
   return `${column}:${value}`
 }
 
@@ -89,13 +121,17 @@ function createNodeName(column: TrafficSankeyColumn, value: string) {
 function parseNodeName(name: string) {
   const separatorIndex = name.indexOf(':')
   return {
-    column: name.slice(0, separatorIndex) as TrafficSankeyColumn,
+    column: name.slice(0, separatorIndex) as SankeyNodeNamespace,
     value: name.slice(separatorIndex + 1),
   }
 }
 
 // 把内部维度值转换成用户可读文本，为统一失败节点显示当前语言的说明。
-function formatDimensionValue(column: TrafficSankeyColumn, value: string) {
+function formatDimensionValue(column: SankeyNodeNamespace, value: string) {
+  if (column === 'other') {
+    return t(`trafficSankey.other.${value}`)
+  }
+
   if (column === 'upstream' && value === 'failed') {
     return t('trafficSankey.requestFailed')
   }
@@ -142,13 +178,18 @@ function openUpstream(params: ECElementEvent) {
 function createRowPath(
   row: TrafficSankeyRow,
   columns: readonly TrafficSankeyColumn[],
+  topValues: SankeyTopValues,
 ) {
   const path: SankeyPathNode[] = []
 
   for (const column of columns) {
+    // 其他分组使用独立命名空间，保留原维度深度且不与真实国家或路径重名。
+    const isOther = column !== 'upstream' && !topValues[column].has(row[column])
     path.push({
       column,
-      name: createNodeName(column, row[column]),
+      name: isOther
+        ? createNodeName('other', column)
+        : createNodeName(column, row[column]),
     })
   }
 
@@ -159,6 +200,7 @@ function createRowPath(
 function aggregateSankeyRows(
   rows: readonly TrafficSankeyRow[],
   columns: readonly TrafficSankeyColumn[],
+  topValues: SankeyTopValues,
 ): SankeyBuildResult {
   const linksByKey = new Map<string, SankeyLink>()
   const nodeValues = new Map<string, number>()
@@ -172,7 +214,7 @@ function aggregateSankeyRows(
       continue
     }
 
-    const path = createRowPath(row, columns)
+    const path = createRowPath(row, columns, topValues)
     for (const node of path) {
       nodeDepths.set(node.name, columnDepths.get(node.column) ?? 0)
       nodeValues.set(node.name, (nodeValues.get(node.name) ?? 0) + row.value)
@@ -232,7 +274,11 @@ function formatTooltip(params: SankeyTooltipParams) {
 }
 
 const chartData = computed(() =>
-  aggregateSankeyRows(props.rows, visibleColumns.value),
+  aggregateSankeyRows(
+    props.rows,
+    visibleColumns.value,
+    topDimensionValues.value,
+  ),
 )
 
 // 按节点最多的一列动态增高画布，为每个 12px 标签保留稳定的垂直阅读空间。
@@ -255,7 +301,6 @@ const chartOption = computed(() => {
   const singleColumn = visibleColumns.value.length === 1
 
   return {
-    animationDuration: 400,
     color: sankeyColorPalette,
     tooltip: {
       trigger: 'item',
@@ -266,6 +311,8 @@ const chartOption = computed(() => {
     series: [
       {
         type: 'sankey',
+        // 在系列内关闭初次展开，避免大画布反复重绘拖慢页面滚动。
+        animationDuration: 0,
         // 保留每列的请求量排名，避免自动布局按连线关系重新排列节点。
         layoutIterations: 0,
         // 按聚合后的总请求量降序排列，同量节点按名称保持稳定顺序。
@@ -300,6 +347,7 @@ const chartOption = computed(() => {
         },
         lineStyle: {
           color: 'gradient',
+          // 保留曲线呈现流向，图表规模由长尾分组控制。
           curveness: 0.5,
           opacity: 0.35,
         },
@@ -339,6 +387,12 @@ const chartOption = computed(() => {
         </el-checkbox>
       </el-checkbox-group>
     </div>
+    <p
+      v-if="selectedColumnSet.has('country') || selectedColumnSet.has('path')"
+      class="muted"
+    >
+      {{ t('trafficSankey.groupingHint', { count: sankeyDimensionLimit }) }}
+    </p>
     <VChart
       :key="chartLocaleKey"
       class="traffic-sankey-chart"

@@ -31,6 +31,11 @@
     "chartAria": "Sankey chart showing request flow by source country or region, RSSHub path prefix, and result. Successful requests flow to the upstream that returned a successful response; failed requests share a single Request failed node. Link widths show request counts.",
     "columnsAria": "Choose which dimension columns are shown in the homepage traffic Sankey chart.",
     "columnsLabel": "Columns",
+    "groupingHint": "The top {count} countries/regions and path prefixes are shown individually. Remaining entries are grouped as Other; all requests are included.",
+    "other": {
+      "country": "Other regions",
+      "path": "Other paths"
+    },
     "columns": {
       "country": "Country/region",
       "path": "RSSHub path prefix",

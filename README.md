@@ -55,7 +55,7 @@ Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让�
 
 统计只覆盖实际进入 RSS 代理的 `GET` / `HEAD` 请求，不包含首页、健康检查、内部接口和 Cloudflare 缓存直接返回的请求。指标允许丢失，展示的是近似请求数量，不是入口总访问量。
 
-首页桑基图展示 `country -> path -> upstream`，最后一列为成功上游或“请求失败”。`path` 只保留原始请求 `pathname` 的第一级，例如 `/github/repos/DIYgod/RSSHub/releases` 记录为 `/github`，不记录后续路径段或查询字符串。请求数使用平台采样权重求和；写入与查询使用数据集 `rsshub_balancer_request_results`。字段约定和新数据集发布顺序见 [Metrics 查询](docs/metrics.md)。
+首页桑基图展示 `country -> path -> upstream`，最后一列为成功上游或“请求失败”。国家/地区与一级路径各展示请求量前 30 项，其余合并为“其他”，请求总量不变。`path` 只保留原始请求 `pathname` 的第一级，例如 `/github/repos/DIYgod/RSSHub/releases` 记录为 `/github`，不记录后续路径段或查询字符串。请求数使用平台采样权重求和；写入与查询使用数据集 `rsshub_balancer_request_results`。字段约定和新数据集发布顺序见 [Metrics 查询](docs/metrics.md)。
 
 ### RSSHub 接口兼容范围
 
