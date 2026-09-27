@@ -266,6 +266,9 @@ const chartOption = computed(() => {
     series: [
       {
         type: 'sankey',
+        // 保留每列的请求量排名，避免自动布局按连线关系重新排列节点。
+        layoutIterations: 0,
+        // 按聚合后的总请求量降序排列，同量节点按名称保持稳定顺序。
         data: Array.from(chartData.value.nodeValues, ([name, value]) => ({
           name,
           value,
@@ -279,7 +282,7 @@ const chartOption = computed(() => {
                 : 'right',
             color: getUpstreamUrl(name) ? '#0969da' : '#24292f',
           },
-        })),
+        })).sort((a, b) => b.value - a.value || a.name.localeCompare(b.name)),
         links: chartData.value.links,
         draggable: false,
         nodeAlign: 'justify',
