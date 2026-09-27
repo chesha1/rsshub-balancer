@@ -15,7 +15,7 @@ import { useI18n } from 'vue-i18n'
 import VChart from 'vue-echarts'
 import type { TrafficSankeyRow } from './types'
 
-type TrafficSankeyColumn = 'country' | 'upstream'
+type TrafficSankeyColumn = 'country' | 'path' | 'upstream'
 
 type SankeyLink = {
   source: string
@@ -52,6 +52,7 @@ const props = defineProps<{
 const { t, locale } = useI18n()
 const trafficSankeyColumns = [
   'country',
+  'path',
   'upstream',
 ] as const satisfies readonly TrafficSankeyColumn[]
 const selectedColumns = ref<TrafficSankeyColumn[]>([...trafficSankeyColumns])
@@ -222,12 +223,12 @@ function formatTooltip(params: SankeyTooltipParams) {
   const data = params.data ?? {}
 
   if (data.source && data.target) {
-    return `${formatNodeName(data.source)} -> ${formatNodeName(data.target)}<br/>${requestCountLabel.value}: ${formatRequestCount(data.value ?? 0)}`
+    return `${formatNodeName(data.source)} -> ${formatNodeName(data.target)}\n${requestCountLabel.value}: ${formatRequestCount(data.value ?? 0)}`
   }
 
   const name = data.name ?? params.name ?? ''
   const value = data.value ?? params.value ?? 0
-  return `${formatNodeName(name)}<br/>${requestCountLabel.value}: ${formatRequestCount(value)}`
+  return `${formatNodeName(name)}\n${requestCountLabel.value}: ${formatRequestCount(value)}`
 }
 
 const chartData = computed(() =>
@@ -258,6 +259,8 @@ const chartOption = computed(() => {
     color: sankeyColorPalette,
     tooltip: {
       trigger: 'item',
+      // 路径来自请求输入，使用画布文本避免被当作 HTML 解析。
+      renderMode: 'richText',
       formatter: formatTooltip,
     },
     series: [

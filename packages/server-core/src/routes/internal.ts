@@ -6,12 +6,14 @@ import { cancelResponseBody } from '../utils'
 type TrafficSankeyRow = {
   country: string
   upstream: string
+  path: string
   value: number
 }
 
 type TrafficSankeySqlRow = {
   country: string
   upstream: string
+  path: string
   request_total: string
 }
 
@@ -21,10 +23,12 @@ const TRAFFIC_SANKEY_QUERY = `
 SELECT
   blob1 AS country,
   blob2 AS upstream,
+  blob3 AS path,
   sum(_sample_interval) AS request_total
 FROM rsshub_balancer_request_flows
 WHERE timestamp > NOW() - INTERVAL '1' DAY
-GROUP BY country, upstream
+  AND blob3 != ''
+GROUP BY country, upstream, path
 ORDER BY request_total DESC
 FORMAT JSON
 `
@@ -36,6 +40,7 @@ function parseTrafficSankeyRows(payload: {
   return payload.data.map((row) => ({
     country: row.country,
     upstream: row.upstream,
+    path: row.path,
     value: Number(row.request_total),
   }))
 }
@@ -66,7 +71,7 @@ async function handleInternalUpstreams(c: Context) {
   }
 }
 
-// 查询最近 24 小时国家到上游的请求数量，供首页桑基图展示。
+// 查询最近 24 小时包含请求路径的三维统计；旧的两字段数据不混入路径分布。
 async function handleTrafficSankey(c: Context) {
   if (c.req.method !== 'GET') {
     return c.text('Method Not Allowed', 405, {

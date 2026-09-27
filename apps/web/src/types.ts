@@ -6,6 +6,7 @@ export const upstreamsResponseSchema = z.object({
 
 export const trafficSankeyRowSchema = z.object({
   country: z.string(),
+  path: z.string(),
   upstream: z.string(),
   value: z.number(),
 })

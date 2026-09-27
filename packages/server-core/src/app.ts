@@ -95,10 +95,10 @@ routes.all('/*', async (c) => {
   }
 
   const request = c.req.raw
-  const requestCountry = metrics.getRequestCountry(request)
+  const requestDimensions = metrics.getRequestDimensions(request)
   const result = await upstream.fetchFromUpstream(request)
   metrics.recordRouteRequestMetric({
-    country: requestCountry,
+    ...requestDimensions,
     upstream: result.upstream ?? 'none',
   })
   return result.response

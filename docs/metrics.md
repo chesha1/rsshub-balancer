@@ -1,23 +1,35 @@
 # Metrics 查询
 
-入口请求统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_request_flows`，只保存来源国家/地区和最终上游。Worker 直接写 binding，Node 将 `{ events: [...] }` 批量上传到 Worker 的 `POST /_internal/metrics/ingest`；每个事件只含 `country`、`upstream`。ingest 依赖 Cloudflare WAF 将访问限制为服务器出口 IP，不使用应用层 token。
+入口请求统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_request_flows`，只保存来源国家/地区、RSSHub 一级路径和最终上游。Worker 直接写 binding，Node 将 `{ events: [...] }` 批量上传到 Worker 的 `POST /_internal/metrics/ingest`；每个事件只含 `country`、`upstream`、`path`。ingest 依赖 Cloudflare WAF 将访问限制为服务器出口 IP，不使用应用层 token。
 
 Worker binding `METRICS` 与查询表名均指向 `rsshub_balancer_request_flows`；写入、查询和首页使用同一字段格式。平台会在首次写入时自动创建数据集，见[官方说明](https://developers.cloudflare.com/analytics/analytics-engine/get-started/#1-name-your-dataset-and-add-it-to-your-worker)。
 
 ## 记录范围与字段
 
-进入完整选路、到达现有记录位置的 GET/HEAD 请求每次写入一个数据点，只记录最终结果。Cache HIT 和入口拒绝不计入。完整选路内部的 fallback 和重试继续记录最终结果。
+共享 RSS 代理入口仅对通过方法检查的 GET/HEAD 请求采集指标，不包含首页、静态资源、健康检查、内部接口和入口拒绝；Cloudflare Cache HIT 未进入应用，也不计入。
+
+采集分为两个时点，但每个请求只写入一个数据点：
+
+1. 进入 RSS 代理、开始选路前，从原始请求保存 `country`，并提取第一级路径作为 `path`。它们属于当前请求的局部数据，不放入模块级状态，也不从上游响应反推。
+2. 选路结束后补上最终尝试的 `upstream`，一次性记录完整事件。重试和 fallback 不额外计数；本地生成的 502 仍保留入口一级路径。
+
+平台适配只负责传输和写入已经采集好的事件：Node 的有界队列不重读请求，Worker 的 ingest 不用上传请求覆盖事件。最终上游在入口尚未确定，因此写入仍在选路结束后发生；处理中进程退出的请求不保证被统计。
 
 | 字段 | 含义 | 当前值 |
 | --- | --- | --- |
 | `blob1` | `country` | 原始请求来源国家/地区，缺失或为空时为 `unknown` |
 | `blob2` | `upstream` | 最终尝试的上游 URL，未触达任何上游时为 `none` |
+| `blob3` | `path` | 原始请求 URL 的 `pathname` 第一级，例如 `/github`；必有值，不含后续路径段或查询字符串 |
 
-写入内容仅为 `{ blobs: [country, upstream] }`，不传 `indexes`、`doubles` 或占位字段。`country` 在 Worker 优先读取 `request.cf.country`，缺失时读取 `CF-IPCountry`；Node 读取可信代理传入的 `CF-IPCountry`。ingest 沿用事件中的国家，不用上传请求的地域覆盖它。
+写入内容仅为 `{ blobs: [country, upstream, path] }`，不传 `indexes`、`doubles` 或占位字段；路径追加为第三列，保留已有两列的含义，符合 [Analytics Engine 按数组顺序映射字段的约定](https://developers.cloudflare.com/analytics/analytics-engine/get-started/#2-write-data-points-from-your-worker)。`country` 在 Worker 优先读取 `request.cf.country`，缺失时读取 `CF-IPCountry`；Node 读取可信代理传入的 `CF-IPCountry`。ingest 沿用事件中的国家，不用上传请求的地域覆盖它。
+
+`path` 从 `new URL(request.url).pathname` 提取第一级，并保留开头的 `/`，例如 `/github/repos/DIYgod/RSSHub/releases` 只记录为 `/github`，`/bilibili/user/video/12345` 只记录为 `/bilibili`。同一一级路径下的后续路径段、用户 ID、其他路径参数和查询字符串均不记录，并合并计数。它无需上游响应、路由映射或 `unknown` 占位，也不读取 `X-RSSHub-Route`。一级路径会在公开桑基图中展示。不采集 HTTP 结果、耗时、ASN、城市、内容类别或客户端分类等其他候选字段。
+
+事件协议和查询响应都要求 `path`，Node、Worker 与前端按同一协议更新，不提供旧事件或旧响应的缺省路径。旧两字段数据的第三列为空，查询通过 `blob3 != ''` 排除；上线初期的图表只包含已采集路径的新数据，满 24 小时后才覆盖完整窗口，不回填历史路径。
 
 `upstream` 只代表这次请求最终尝试的实例，不展开重试过程，也不表示该上游一定成功。所有候选已标记失败等未发起上游请求的情况写入 `none`，首页显示“未触达上游”。
 
-## 最近 24 小时国家到上游的请求数量
+## 最近 24 小时国家、一级路径与上游的请求数量
 
 `GET /_internal/metrics/country-colo-sankey` 随 RSS 承接环境由 Node 或 Worker 提供，两端通过同一 HTTP SQL API 查询。服务端配置 `CLOUDFLARE_ACCOUNT_ID` 和具备 Account Analytics Read 权限的 `CLOUDFLARE_ANALYTICS_API_TOKEN`，不接受客户端自定义 SQL。
 
@@ -25,17 +37,19 @@ Worker binding `METRICS` 与查询表名均指向 `rsshub_balancer_request_flows
 SELECT
   blob1 AS country,
   blob2 AS upstream,
+  blob3 AS path,
   sum(_sample_interval) AS request_total
 FROM rsshub_balancer_request_flows
 WHERE timestamp > NOW() - INTERVAL '1' DAY
-GROUP BY country, upstream
+  AND blob3 != ''
+GROUP BY country, upstream, path
 ORDER BY request_total DESC
 FORMAT JSON
 ```
 
-接口返回 `{ rows, generatedAt, windowHours: 24 }`，每行为 `{ country, upstream, value }`。SQL API 的整数聚合结果 `request_total` 是字符串，服务端用 `Number(row.request_total)` 转为数字后作为 `value` 返回。
+接口返回 `{ rows, generatedAt, windowHours: 24 }`，每行为 `{ country, upstream, path, value }`。SQL API 的整数聚合结果 `request_total` 是字符串，服务端用 `Number(row.request_total)` 转为数字后作为 `value` 返回。
 
-首页默认展示 `country -> upstream`，连线宽度、节点总量和悬浮提示均使用这个请求数量。维度复选框和按可见列绘图的逻辑继续保留，当前提供国家和上游两个选项，可自由勾选或取消，不限制最少显示列数；后续新增维度时继续使用同一选择逻辑。
+首页默认展示 `country -> path -> upstream`，连线宽度、节点总量和悬浮提示均使用这个请求数量。维度复选框提供国家、RSSHub 一级路径和上游三个选项，可自由勾选或取消，不限制最少显示列数；取消路径时按可见列重新聚合为 `country -> upstream`，这批数据的请求总量不变。
 
 每个数据点代表一次被记录的请求，按平台 `_sample_interval` 求和即可修正采样，无需额外写入固定为 `1` 的计数字段，见 [Analytics Engine 采样说明](https://developers.cloudflare.com/analytics/analytics-engine/sampling/#how-to-read-sampled-data)。最近 24 小时使用平台写入时间 `timestamp`，包含 Node 排队和上传延迟。指标是近似统计，允许丢失，不作为计费、审计或故障切换依据；Node 退出时不额外上传内存队列。
 

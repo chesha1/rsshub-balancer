@@ -55,9 +55,9 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 - 真实触达的上游分布
 - 国家到上游的请求数量
 
-流量数据来自 Workers Analytics Engine，只记录来源国家/地区和最终上游，用于观察请求从哪里进入、由哪些实例承接。
+流量数据来自 Workers Analytics Engine，只记录来源国家/地区、RSSHub 一级路径和最终上游。国家与一级路径在请求进入代理时采集，选路完成后补上最终上游，每个请求只写入一条记录。
 
-首页桑基图展示 `country -> upstream`，请求数使用平台采样权重求和；写入与查询使用数据集 `rsshub_balancer_request_flows`。字段约定见 [Metrics 查询](docs/metrics.md)，后续维度见 [丰富桑基图字段](docs/todo.md#丰富桑基图字段)。
+首页桑基图展示 `country -> path -> upstream`，`path` 只保留原始请求 `pathname` 的第一级，例如 `/github/repos/DIYgod/RSSHub/releases` 记录为 `/github`，不记录后续路径段或查询字符串。请求数使用平台采样权重求和；写入与查询使用数据集 `rsshub_balancer_request_flows`。字段约定见 [Metrics 查询](docs/metrics.md)。
 
 ### RSSHub 接口兼容范围
 
