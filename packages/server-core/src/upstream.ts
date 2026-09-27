@@ -17,6 +17,7 @@ type InstancesCache = {
 
 export type UpstreamFetchResult = {
   response: Response
+  // 仅成功取得可转发响应时返回上游，失败尝试的实例仅保留在诊断日志中。
   upstream?: string
 }
 
@@ -157,7 +158,7 @@ async function markFailedUpstream(
   }
 }
 
-// 按优先级依次尝试上游实例，返回首个成功响应和最终触达的上游；全部失败时返回 502。
+// 按优先级依次尝试上游实例，返回首个成功响应及其上游；失败只返回 502，不归因到失败实例。
 export async function fetchFromUpstream(
   request: Request,
 ): Promise<UpstreamFetchResult> {
@@ -214,7 +215,6 @@ export async function fetchFromUpstream(
           status: 502,
           headers: { 'content-type': 'text/plain; charset=UTF-8' },
         }),
-        upstream: finalUpstreamHost,
       }
     }
 
@@ -358,7 +358,6 @@ export async function fetchFromUpstream(
         status: 502,
         headers: { 'content-type': 'text/plain; charset=UTF-8' },
       }),
-      upstream: finalUpstreamHost,
     }
   } catch (e) {
     if (phase === 'prepare') {
@@ -397,7 +396,6 @@ export async function fetchFromUpstream(
         status: 502,
         headers: { 'content-type': 'text/plain; charset=UTF-8' },
       }),
-      upstream: finalUpstreamHost,
     }
   }
 }

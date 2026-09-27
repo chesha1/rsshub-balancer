@@ -22,21 +22,21 @@
   },
   "trafficSankey": {
     "title": "Request Flow in the Last 24 Hours",
-    "summary": "Regular proxy requests grouped by source country or region, RSSHub path prefix, and upstream. Only the first path segment (for example, /github) is recorded; later segments and query strings are excluded. Link widths show request counts.",
+    "summary": "Regular proxy requests grouped by source country or region, RSSHub path prefix, and result. Successful requests flow to the upstream that returned a successful response; failed requests share a single Request failed node. Only the first path segment (for example, /github) is recorded; later segments and query strings are excluded. Link widths show request counts.",
     "loading": "Loading traffic distribution for the last 24 hours…",
     "error": "Traffic distribution for the last 24 hours is temporarily unavailable.",
     "empty": "No traffic distribution data is available for the last 24 hours.",
     "chartLoading": "Loading traffic chart…",
     "chartError": "The traffic chart could not be loaded. Refresh the page to try again.",
-    "chartAria": "Sankey chart showing request flow by source country or region, RSSHub path prefix, and upstream. Link widths show request counts.",
+    "chartAria": "Sankey chart showing request flow by source country or region, RSSHub path prefix, and result. Successful requests flow to the upstream that returned a successful response; failed requests share a single Request failed node. Link widths show request counts.",
     "columnsAria": "Choose which dimension columns are shown in the homepage traffic Sankey chart.",
     "columnsLabel": "Columns",
     "columns": {
       "country": "Country/region",
       "path": "RSSHub path prefix",
-      "upstream": "Real upstream"
+      "upstream": "Result"
     },
-    "upstreamNotRecorded": "No upstream reached",
+    "requestFailed": "Request failed",
     "tooltipRequests": "Requests"
   },
   "howItWorks": {
@@ -90,7 +90,7 @@
       },
       "metrics": {
         "status": "🚫 Not public",
-        "notes": "Request sources, RSSHub path prefixes, and upstreams are written to Workers Analytics Engine and queried through the SQL API"
+        "notes": "Request sources, RSSHub path prefixes, and results are written to Workers Analytics Engine and queried through the SQL API"
       },
       "openapi": {
         "status": "❌ Unavailable",

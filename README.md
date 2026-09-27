@@ -52,12 +52,12 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 - 当前使用中的 RSSHub 上游实例
 - 最近 24 小时请求来源国家/地区
-- 真实触达的上游分布
-- 国家到上游的请求数量
+- 成功上游与请求失败的分布
+- 国家、一级路径到处理结果的请求数量
 
-流量数据来自 Workers Analytics Engine，只记录来源国家/地区、RSSHub 一级路径和最终上游。国家与一级路径在请求进入代理时采集，选路完成后补上最终上游，每个请求只写入一条记录。
+流量数据来自 Workers Analytics Engine，只记录来源国家/地区、RSSHub 一级路径和请求最终结果。国家与一级路径在请求进入代理时采集，选路完成后记录成功上游 URL，或统一的“请求失败”，每个请求只写入一条记录。所有上游尝试失败和命中失败缓存统一归类，不计入某个上游的成功请求。
 
-首页桑基图展示 `country -> path -> upstream`，`path` 只保留原始请求 `pathname` 的第一级，例如 `/github/repos/DIYgod/RSSHub/releases` 记录为 `/github`，不记录后续路径段或查询字符串。请求数使用平台采样权重求和；写入与查询使用数据集 `rsshub_balancer_request_flows`。字段约定见 [Metrics 查询](docs/metrics.md)。
+首页桑基图展示 `country -> path -> upstream`，最后一列为成功上游或“请求失败”。`path` 只保留原始请求 `pathname` 的第一级，例如 `/github/repos/DIYgod/RSSHub/releases` 记录为 `/github`，不记录后续路径段或查询字符串。请求数使用平台采样权重求和；写入与查询使用数据集 `rsshub_balancer_request_results`。字段约定和新数据集发布顺序见 [Metrics 查询](docs/metrics.md)。
 
 ### RSSHub 接口兼容范围
 

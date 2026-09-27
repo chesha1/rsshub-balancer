@@ -94,10 +94,10 @@ function parseNodeName(name: string) {
   }
 }
 
-// 把内部维度值转换成用户可读文本，未触达上游时使用当前语言的说明。
+// 把内部维度值转换成用户可读文本，为统一失败节点显示当前语言的说明。
 function formatDimensionValue(column: TrafficSankeyColumn, value: string) {
-  if (column === 'upstream' && value === 'none') {
-    return t('trafficSankey.upstreamNotRecorded')
+  if (column === 'upstream' && value === 'failed') {
+    return t('trafficSankey.requestFailed')
   }
 
   return value

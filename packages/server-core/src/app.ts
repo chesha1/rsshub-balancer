@@ -99,7 +99,8 @@ routes.all('/*', async (c) => {
   const result = await upstream.fetchFromUpstream(request)
   metrics.recordRouteRequestMetric({
     ...requestDimensions,
-    upstream: result.upstream ?? 'none',
+    // 按请求最终结果计数，实际尝试失败和失败缓存拦截统一归入失败节点。
+    upstream: result.upstream ?? 'failed',
   })
   return result.response
 })

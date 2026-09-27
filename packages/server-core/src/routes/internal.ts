@@ -25,9 +25,8 @@ SELECT
   blob2 AS upstream,
   blob3 AS path,
   sum(_sample_interval) AS request_total
-FROM rsshub_balancer_request_flows
+FROM rsshub_balancer_request_results
 WHERE timestamp > NOW() - INTERVAL '1' DAY
-  AND blob3 != ''
 GROUP BY country, upstream, path
 ORDER BY request_total DESC
 FORMAT JSON
@@ -71,7 +70,7 @@ async function handleInternalUpstreams(c: Context) {
   }
 }
 
-// 查询最近 24 小时包含请求路径的三维统计；旧的两字段数据不混入路径分布。
+// 查询最近 24 小时按国家、一级路径与最终结果聚合的数据，不混入旧的尝试上游统计。
 async function handleTrafficSankey(c: Context) {
   if (c.req.method !== 'GET') {
     return c.text('Method Not Allowed', 405, {

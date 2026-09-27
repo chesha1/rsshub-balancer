@@ -22,21 +22,21 @@
   },
   "trafficSankey": {
     "title": "最近 24 小时请求流向分布",
-    "summary": "按来源国家/地区、RSSHub 一级路径和上游聚合普通入口代理请求。路径只保留第一级（例如 /github），不记录后续路径段或查询字符串，连线宽度表示请求数量。",
+    "summary": "按来源国家/地区、RSSHub 一级路径和处理结果聚合普通入口代理请求。成功请求流向返回成功响应的上游，失败请求统一归为“请求失败”。路径只保留第一级（例如 /github），不记录后续路径段或查询字符串，连线宽度表示请求数量。",
     "loading": "正在加载最近 24 小时流量分布…",
     "error": "最近 24 小时流量分布暂时不可用。",
     "empty": "最近 24 小时暂无可展示的流量分布数据。",
     "chartLoading": "正在加载流量图表…",
     "chartError": "流量图表加载失败，请刷新页面重试。",
-    "chartAria": "按请求来源国家或地区、RSSHub 一级路径和上游展示流向的桑基图，连线宽度表示请求数量。",
+    "chartAria": "按请求来源国家或地区、RSSHub 一级路径和处理结果展示流向的桑基图。成功请求流向返回成功响应的上游，失败请求统一归为“请求失败”，连线宽度表示请求数量。",
     "columnsAria": "选择首页流量桑基图显示的维度列。",
     "columnsLabel": "显示列",
     "columns": {
       "country": "来源国家/地区",
       "path": "RSSHub 一级路径",
-      "upstream": "真实上游"
+      "upstream": "处理结果"
     },
-    "upstreamNotRecorded": "未触达上游",
+    "requestFailed": "请求失败",
     "tooltipRequests": "请求数"
   },
   "howItWorks": {
@@ -90,7 +90,7 @@
       },
       "metrics": {
         "status": "🚫 未开放",
-        "notes": "请求来源、RSSHub 一级路径与上游写入 Workers Analytics Engine，通过 SQL API 查询"
+        "notes": "请求来源、RSSHub 一级路径与处理结果写入 Workers Analytics Engine，通过 SQL API 查询"
       },
       "openapi": {
         "status": "❌ 不可用",

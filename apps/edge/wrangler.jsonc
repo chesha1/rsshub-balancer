@@ -24,7 +24,7 @@
   "analytics_engine_datasets": [
     {
       "binding": "METRICS",
-      "dataset": "rsshub_balancer_request_flows"
+      "dataset": "rsshub_balancer_request_results"
     }
   ],
   "migrations": [

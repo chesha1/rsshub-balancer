@@ -26,7 +26,7 @@ export function getRequestDimensions(
   }
 }
 
-// 选路完成后将国家、路径与最终上游一次性交给平台记录，指标故障不影响主请求。
+// 选路完成后一次性记录国家、路径与成功上游或失败结果，指标故障不影响主请求。
 export function recordRouteRequestMetric(event: RouteRequestMetric): void {
   try {
     if (!recordMetric) throw new Error('Metrics is not configured')

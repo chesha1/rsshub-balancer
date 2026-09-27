@@ -1,8 +1,8 @@
 # Metrics 查询
 
-入口请求统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_request_flows`，只保存来源国家/地区、RSSHub 一级路径和最终上游。Worker 直接写 binding，Node 将 `{ events: [...] }` 批量上传到 Worker 的 `POST /_internal/metrics/ingest`；每个事件只含 `country`、`upstream`、`path`。ingest 依赖 Cloudflare WAF 将访问限制为服务器出口 IP，不使用应用层 token。
+入口请求统计写入 Workers Analytics Engine 数据集 `rsshub_balancer_request_results`，只保存来源国家/地区、RSSHub 一级路径和请求最终结果。结果沿用 `upstream` 字段：成功时为对应上游 URL，失败时为 `failed`。Worker 直接写 binding，Node 将 `{ events: [...] }` 批量上传到 Worker 的 `POST /_internal/metrics/ingest`；每个事件只含 `country`、`upstream`、`path`。ingest 依赖 Cloudflare WAF 将访问限制为服务器出口 IP，不使用应用层 token。
 
-Worker binding `METRICS` 与查询表名均指向 `rsshub_balancer_request_flows`；写入、查询和首页使用同一字段格式。平台会在首次写入时自动创建数据集，见[官方说明](https://developers.cloudflare.com/analytics/analytics-engine/get-started/#1-name-your-dataset-and-add-it-to-your-worker)。
+Worker binding `METRICS` 与查询表名均指向 `rsshub_balancer_request_results`；写入、查询和首页使用同一字段格式。平台会在首次写入时自动创建数据集，见[官方说明](https://developers.cloudflare.com/analytics/analytics-engine/get-started/#1-name-your-dataset-and-add-it-to-your-worker)。
 
 ## 记录范围与字段
 
@@ -11,25 +11,29 @@ Worker binding `METRICS` 与查询表名均指向 `rsshub_balancer_request_flows
 采集分为两个时点，但每个请求只写入一个数据点：
 
 1. 进入 RSS 代理、开始选路前，从原始请求保存 `country`，并提取第一级路径作为 `path`。它们属于当前请求的局部数据，不放入模块级状态，也不从上游响应反推。
-2. 选路结束后补上最终尝试的 `upstream`，一次性记录完整事件。重试和 fallback 不额外计数；本地生成的 502 仍保留入口一级路径。
+2. 选路结束后补上成功返回响应的上游 URL，或统一的失败值 `failed`，一次性记录完整事件。重试和 fallback 不额外计数；失败缓存拦截、本次尝试全部失败和内部异常均属于请求失败，仍保留入口一级路径。
 
-平台适配只负责传输和写入已经采集好的事件：Node 的有界队列不重读请求，Worker 的 ingest 不用上传请求覆盖事件。最终上游在入口尚未确定，因此写入仍在选路结束后发生；处理中进程退出的请求不保证被统计。
+平台适配只负责传输和写入已经采集好的事件：Node 的有界队列不重读请求，Worker 的 ingest 不用上传请求覆盖事件。请求最终结果在入口尚未确定，因此写入仍在选路结束后发生；处理中进程退出的请求不保证被统计。
 
 | 字段 | 含义 | 当前值 |
 | --- | --- | --- |
 | `blob1` | `country` | 原始请求来源国家/地区，缺失或为空时为 `unknown` |
-| `blob2` | `upstream` | 最终尝试的上游 URL，未触达任何上游时为 `none` |
+| `blob2` | `upstream` | 成功返回响应的上游 URL；请求最终失败时统一为 `failed` |
 | `blob3` | `path` | 原始请求 URL 的 `pathname` 第一级，例如 `/github`；必有值，不含后续路径段或查询字符串 |
 
 写入内容仅为 `{ blobs: [country, upstream, path] }`，不传 `indexes`、`doubles` 或占位字段；路径追加为第三列，保留已有两列的含义，符合 [Analytics Engine 按数组顺序映射字段的约定](https://developers.cloudflare.com/analytics/analytics-engine/get-started/#2-write-data-points-from-your-worker)。`country` 在 Worker 优先读取 `request.cf.country`，缺失时读取 `CF-IPCountry`；Node 读取可信代理传入的 `CF-IPCountry`。ingest 沿用事件中的国家，不用上传请求的地域覆盖它。
 
-`path` 从 `new URL(request.url).pathname` 提取第一级，并保留开头的 `/`，例如 `/github/repos/DIYgod/RSSHub/releases` 只记录为 `/github`，`/bilibili/user/video/12345` 只记录为 `/bilibili`。同一一级路径下的后续路径段、用户 ID、其他路径参数和查询字符串均不记录，并合并计数。它无需上游响应、路由映射或 `unknown` 占位，也不读取 `X-RSSHub-Route`。一级路径会在公开桑基图中展示。不采集 HTTP 结果、耗时、ASN、城市、内容类别或客户端分类等其他候选字段。
+`path` 从 `new URL(request.url).pathname` 提取第一级，并保留开头的 `/`，例如 `/github/repos/DIYgod/RSSHub/releases` 只记录为 `/github`，`/bilibili/user/video/12345` 只记录为 `/bilibili`。同一一级路径下的后续路径段、用户 ID、其他路径参数和查询字符串均不记录，并合并计数。它无需上游响应、路由映射或 `unknown` 占位，也不读取 `X-RSSHub-Route`。一级路径会在公开桑基图中展示。不额外采集 HTTP 状态码、耗时、ASN、城市、内容类别或客户端分类等字段。
 
-事件协议和查询响应都要求 `path`，Node、Worker 与前端按同一协议更新，不提供旧事件或旧响应的缺省路径。旧两字段数据的第三列为空，查询通过 `blob3 != ''` 排除；上线初期的图表只包含已采集路径的新数据，满 24 小时后才覆盖完整窗口，不回填历史路径。
+`upstream` 的成功判定沿用现有选路逻辑：上游响应状态为 200–399 时记录该实例；这包含重定向和 304，不保证重定向最终成功或响应正文完整送达客户端。先尝试 A 失败、再尝试 B 成功时只记录 B；所有实际尝试均失败、全部候选被失败标记跳过，或处理过程出现内部异常时，统一记录 `failed`。首页将其显示为“请求失败”，不再把失败请求归到最后尝试的实例。具体尝试过哪些上游以及缓存失败、转发失败等原因继续保留在日志中。
 
-`upstream` 只代表这次请求最终尝试的实例，不展开重试过程，也不表示该上游一定成功。所有候选已标记失败等未发起上游请求的情况写入 `none`，首页显示“未触达上游”。
+## 新口径与发布顺序
 
-## 最近 24 小时国家、一级路径与上游的请求数量
+旧数据集 `rsshub_balancer_request_flows` 的上游 URL 混合了成功请求和最后一次失败尝试，无法可靠还原请求结果。新口径独立写入 `rsshub_balancer_request_results`，不查询或回填旧数据；旧数据集不删除。事件协议和查询响应都要求完整的 `country`、`path`、`upstream` 三字段，不添加版本或其他采集字段。
+
+发布时先更新 Origin，确认旧进程已停止，再紧接着更新 Edge（包含 Web），让新数据集只接收新口径事件。如果先更新 Edge，旧 Origin 上传的最后尝试实例会被误当作成功结果写入新数据集。两步之间以及新数据集首次写入前，统计查询可能暂时不可用；写入并可查询后开始展示，满 24 小时后覆盖完整时间窗口。
+
+## 最近 24 小时国家、一级路径与处理结果的请求数量
 
 `GET /_internal/metrics/country-colo-sankey` 随 RSS 承接环境由 Node 或 Worker 提供，两端通过同一 HTTP SQL API 查询。服务端配置 `CLOUDFLARE_ACCOUNT_ID` 和具备 Account Analytics Read 权限的 `CLOUDFLARE_ANALYTICS_API_TOKEN`，不接受客户端自定义 SQL。
 
@@ -39,9 +43,8 @@ SELECT
   blob2 AS upstream,
   blob3 AS path,
   sum(_sample_interval) AS request_total
-FROM rsshub_balancer_request_flows
+FROM rsshub_balancer_request_results
 WHERE timestamp > NOW() - INTERVAL '1' DAY
-  AND blob3 != ''
 GROUP BY country, upstream, path
 ORDER BY request_total DESC
 FORMAT JSON
@@ -49,7 +52,7 @@ FORMAT JSON
 
 接口返回 `{ rows, generatedAt, windowHours: 24 }`，每行为 `{ country, upstream, path, value }`。SQL API 的整数聚合结果 `request_total` 是字符串，服务端用 `Number(row.request_total)` 转为数字后作为 `value` 返回。
 
-首页默认展示 `country -> path -> upstream`，连线宽度、节点总量和悬浮提示均使用这个请求数量。维度复选框提供国家、RSSHub 一级路径和上游三个选项，可自由勾选或取消，不限制最少显示列数；取消路径时按可见列重新聚合为 `country -> upstream`，这批数据的请求总量不变。
+首页默认展示 `country -> path -> upstream`，最后一列标为“处理结果”，包含成功上游和统一的“请求失败”节点。连线宽度、节点总量和悬浮提示均使用请求数量。维度复选框提供国家、RSSHub 一级路径和处理结果三个选项，可自由勾选或取消，不限制最少显示列数；取消路径时按可见列重新聚合为 `country -> upstream`，这批数据的请求总量不变。成功上游可点击打开，失败节点不提供链接。
 
 每个数据点代表一次被记录的请求，按平台 `_sample_interval` 求和即可修正采样，无需额外写入固定为 `1` 的计数字段，见 [Analytics Engine 采样说明](https://developers.cloudflare.com/analytics/analytics-engine/sampling/#how-to-read-sampled-data)。最近 24 小时使用平台写入时间 `timestamp`，包含 Node 排队和上传延迟。指标是近似统计，允许丢失，不作为计费、审计或故障切换依据；Node 退出时不额外上传内存队列。
 
