@@ -51,9 +51,9 @@ Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让�
 - 成功上游与请求失败的分布
 - 国家、一级路径到处理结果的请求数量
 
-流量数据来自 Workers Analytics Engine，只记录来源国家/地区、RSSHub 一级路径和请求最终结果。Edge 直接写入，Origin 批量上传至 Edge 后写入同一数据集。国家与一级路径在请求进入代理时采集，选路完成后记录成功上游 URL，或统一的“请求失败”，每个被记录的请求只写入一条记录。所有上游尝试失败和命中失败标记统一归类，不计入某个上游的成功请求。
+流量数据来自 Workers Analytics Engine，只记录来源国家/地区、请求一级路径和请求最终结果。Edge 直接写入，Origin 批量上传至 Edge 后写入同一数据集。国家与一级路径在请求进入代理时采集，选路完成后记录成功上游 URL，或统一的“请求失败”，每个被记录的请求只写入一条记录。所有上游尝试失败和命中失败标记统一归类，不计入某个上游的成功请求。
 
-统计只覆盖实际进入 RSS 代理的 `GET` / `HEAD` 请求，不包含首页、健康检查、内部接口和 Cloudflare 缓存直接返回的请求。指标允许丢失，展示的是近似请求数量，不是入口总访问量。
+统计只覆盖实际进入 RSS 代理的 `GET` / `HEAD` 请求，不包含首页、本站资源、健康检查、内部接口和 Cloudflare 缓存直接返回的请求。一级路径也包含无法识别的请求，不代表有效订阅数量。指标允许丢失，展示的是近似请求数量，不是入口总访问量。
 
 首页桑基图展示 `country -> path -> upstream`，最后一列为成功上游或“请求失败”。国家/地区与一级路径各展示请求量前 30 项，其余合并为“其他”，请求总量不变。`path` 只保留原始请求 `pathname` 的第一级，例如 `/github/repos/DIYgod/RSSHub/releases` 记录为 `/github`，不记录后续路径段或查询字符串。请求数使用平台采样权重求和；写入与查询使用数据集 `rsshub_balancer_request_results`。字段约定和新数据集发布顺序见 [Metrics 查询](docs/metrics.md)。
 
@@ -65,11 +65,16 @@ Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让�
 | --- | --- |
 | `/:namespace/:path` | `GET` / `HEAD` 按缓存探测和失败避让结果转发到 RSSHub 上游，其他方法返回 405 |
 | `/` | 自定义首页 |
+| `/_assets/*`、根目录静态文件（如 `/favicon.ico`、`/apple-touch-icon.png`） | 本站资源：`/_assets/*` 下的首页构建产物由 Edge 返回，其余地址在本地返回 404；均不转发到 RSSHub 上游，也不计入统计 |
 | `/healthz` | 任一候选上游的健康接口返回 2xx 且正文为 `ok` 时返回 200，否则返回 503 |
 | `/robots.txt` | 禁止搜索引擎索引 |
 | `/api/route/status` | 聚合查询任一上游是否已缓存指定路由 |
 | `/metrics` | 不对外开放，指标写入 Workers Analytics Engine |
 | `/api/openapi.json`、`/api/reference` 等元数据接口 | 不对外提供，请直接访问上游 RSSHub 实例 |
+
+根目录静态文件指根目录下只有一个路径段、扩展名为图片、图标、样式、脚本或字体的地址（`ico`、`png`、`jpg`、`jpeg`、`gif`、`webp`、`avif`、`svg`、`css`、`js`、`mjs`、`woff`、`woff2`、`ttf`、`otf`、`eot`，不区分大小写），与 `/_assets` 目录一起归本站所有。归属只看请求路径，不看查询字符串和请求头；带后续路径段的地址（如 `/example/user.png`）和其他扩展名（如 `/feed.xml`）仍按普通 Feed 路由代理。
+
+长期 Worker Routes 不包含根目录文件：即使把 `/favicon.ico` 等文件加入首页构建产物，也只有 `pnpm dev:edge` 和故障接管期间能访问，日常运行时仍由 Origin 返回 404。需要提供这类文件时，须同时增加对应的 Worker Route，见[运行与接管](#运行与接管)。
 
 ## 项目边界
 

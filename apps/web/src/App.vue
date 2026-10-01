@@ -30,6 +30,11 @@ const compatibilityRows: CompatibilityRow[] = [
     notesKey: 'compatibility.rows.home.notes',
   },
   {
+    path: '/_assets/*, /favicon.ico',
+    statusKey: 'compatibility.rows.localResource.status',
+    notesKey: 'compatibility.rows.localResource.notes',
+  },
+  {
     path: '/healthz',
     statusKey: 'compatibility.rows.healthz.status',
     notesKey: 'compatibility.rows.healthz.notes',

@@ -3,18 +3,16 @@ import { proxy } from 'hono/proxy'
 import * as metrics from './metrics'
 import { internalRoutes } from './routes/internal'
 import * as upstream from './upstream'
-import { cancelResponseBody } from './utils'
+import { cancelResponseBody, isLocalResourcePath } from './utils'
 
 // 统一注册一批明确不对外提供的路由，避免下面散落多条重复的 notFound 声明。
+// 本站资源（/_assets 目录与根目录静态文件）由代理入口通过 isLocalResourcePath() 统一判断，不在这里重复声明。
 const notFoundRoutes = [
-  '/_assets/*',
   '/_internal/*',
   '/metrics',
   '/api/*',
   '/.well-known/*',
   '/cdn-cgi/*',
-  '/logo.png',
-  '/favicon.ico',
 ] as const
 
 const publicProxyAllowedMethods = new Set(['GET', 'HEAD'])
@@ -87,6 +85,9 @@ for (const path of notFoundRoutes) {
 routes.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /'))
 
 routes.all('/*', async (c) => {
+  // 本站资源在进入代理前结束，不触发上游探测、转发、失败标记或 RSS 指标。
+  if (isLocalResourcePath(c.req.path)) return c.notFound()
+
   const method = c.req.method
   if (!publicProxyAllowedMethods.has(method)) {
     return c.text('Method Not Allowed', 405, {

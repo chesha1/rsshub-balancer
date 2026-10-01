@@ -22,13 +22,13 @@
   },
   "trafficSankey": {
     "title": "Request Flow in the Last 24 Hours",
-    "summary": "Regular feed proxy requests recorded by the origin and standby environments, grouped by source country or region, RSSHub path prefix, and final result. Each recorded request counts once; retries do not add to the count. Successful requests flow to the responding upstream; failed requests share a single Request failed node. Only the first path segment (for example, /github) is recorded; later segments and query strings are excluded. Link widths show approximate request counts, excluding requests served directly from Cloudflare cache.",
+    "summary": "Requests that reached the RSS proxy, as recorded by the origin and standby environments, grouped by source country or region, request path prefix, and final result. Pages, static assets, and internal endpoints served by this site are not included. Each recorded request counts once; retries do not add to the count. Successful requests flow to the responding upstream; failed requests share a single Request failed node. Only the first path segment (for example, /github) is recorded; later segments and query strings are excluded. Path prefixes also include unrecognized requests, so they do not reflect the number of valid subscriptions. Link widths show approximate request counts, excluding requests served directly from Cloudflare cache.",
     "loading": "Loading traffic distribution for the last 24 hours…",
     "error": "Traffic distribution for the last 24 hours is temporarily unavailable.",
     "empty": "No traffic distribution data is available for the last 24 hours.",
     "chartLoading": "Loading traffic chart…",
     "chartError": "The traffic chart could not be loaded. Refresh the page to try again.",
-    "chartAria": "Sankey chart showing request flow by source country or region, RSSHub path prefix, and result. Successful requests flow to the upstream that returned a successful response; failed requests share a single Request failed node. Link widths show request counts.",
+    "chartAria": "Sankey chart showing request flow by source country or region, request path prefix, and result. Successful requests flow to the upstream that returned a successful response; failed requests share a single Request failed node. Link widths show request counts.",
     "columnsAria": "Choose which dimension columns are shown in the homepage traffic Sankey chart.",
     "columnsLabel": "Columns",
     "groupingHint": "The top {count} countries/regions and path prefixes are shown individually. Remaining entries are grouped as Other; all requests are included.",
@@ -38,7 +38,7 @@
     },
     "columns": {
       "country": "Country/region",
-      "path": "RSSHub path prefix",
+      "path": "Request path prefix",
       "upstream": "Result"
     },
     "requestFailed": "Request failed",
@@ -78,6 +78,10 @@
       "home": {
         "status": "✅ Custom",
         "notes": "This page, replaces the original RSSHub homepage"
+      },
+      "localResource": {
+        "status": "✅ Custom",
+        "notes": "/_assets/* contains this page's static assets; root-level image, icon, stylesheet, script, and font files (for example, /favicon.ico) return 404 and are not forwarded upstream"
       },
       "healthz": {
         "status": "✅ Custom",
