@@ -22,7 +22,7 @@
   },
   "trafficSankey": {
     "title": "Request Flow in the Last 24 Hours",
-    "summary": "Requests that reached the RSS proxy, as recorded by the origin and standby environments, grouped by source country or region, request path prefix, and final result. Pages, static assets, and internal endpoints served by this site are not included. Each recorded request counts once; retries do not add to the count. Successful requests flow to the responding upstream; failed requests share a single Request failed node. Only the first path segment (for example, /github) is recorded; later segments and query strings are excluded. Path prefixes also include unrecognized requests, so they do not reflect the number of valid subscriptions. Link widths show approximate request counts, excluding requests served directly from Cloudflare cache.",
+    "summary": "Shows how RSS requests flow from country/region through path prefix to result; link widths show approximate request counts. Requests served directly from Cloudflare cache are excluded, and only the first path segment is recorded.",
     "loading": "Loading traffic distribution for the last 24 hours…",
     "error": "Traffic distribution for the last 24 hours is temporarily unavailable.",
     "empty": "No traffic distribution data is available for the last 24 hours.",
