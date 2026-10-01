@@ -75,57 +75,25 @@
         "status": "✅ 负载均衡",
         "notes": "支持 GET/HEAD，优先复用上游缓存，失败后尝试其他候选"
       },
-      "home": {
+      "site": {
         "status": "✅ 自定义",
-        "notes": "本页面，替代 RSSHub 原始首页"
-      },
-      "localResource": {
-        "status": "✅ 自定义",
-        "notes": "/_assets/* 为本页面的静态资源；根目录下的图片、图标、样式、脚本和字体文件（例如 /favicon.ico）返回 404，不转发到上游"
+        "notes": "本站页面与资源，均不转发到上游；/robots.txt 要求搜索引擎不要抓取本站，根目录下的图标、图片等静态文件（例如 /favicon.ico）返回 404"
       },
       "healthz": {
         "status": "✅ 自定义",
         "notes": "至少一个当前上游健康时返回 ok，否则返回 503"
       },
-      "robots": {
-        "status": "✅ 自定义",
-        "notes": "要求搜索引擎不要抓取本站"
-      },
       "routeStatus": {
         "status": "✅ 聚合代理",
         "notes": "查询任一上游是否已缓存指定路由"
       },
+      "api": {
+        "status": "❌ 不可用",
+        "notes": "除 /api/route/status 外均返回 404；API 文档、路由元数据等请直接访问上游实例"
+      },
       "metrics": {
         "status": "🚫 未开放",
         "notes": "返回 404；请求流向统计通过首页的最近 24 小时图表展示"
-      },
-      "openapi": {
-        "status": "❌ 不可用",
-        "notes": "API 文档请直接访问上游实例"
-      },
-      "reference": {
-        "status": "❌ 不可用",
-        "notes": "交互式 API 文档 UI"
-      },
-      "namespace": {
-        "status": "❌ 不可用",
-        "notes": "命名空间元数据查询"
-      },
-      "category": {
-        "status": "❌ 不可用",
-        "notes": "分类查询"
-      },
-      "radar": {
-        "status": "❌ 不可用",
-        "notes": "Radar 规则查询"
-      },
-      "follow": {
-        "status": "❌ 不可用",
-        "notes": "Follow 实例配置"
-      },
-      "apiRoute": {
-        "status": "❌ 不可用",
-        "notes": "业务 JSON API（apiRoute）"
       }
     }
   },

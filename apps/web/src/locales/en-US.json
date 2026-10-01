@@ -75,57 +75,25 @@
         "status": "✅ Load balanced",
         "notes": "GET/HEAD supported; prefers upstream caches and tries other candidates on failure"
       },
-      "home": {
+      "site": {
         "status": "✅ Custom",
-        "notes": "This page, replaces the original RSSHub homepage"
-      },
-      "localResource": {
-        "status": "✅ Custom",
-        "notes": "/_assets/* contains this page's static assets; root-level image, icon, stylesheet, script, and font files (for example, /favicon.ico) return 404 and are not forwarded upstream"
+        "notes": "This site's pages and assets, not forwarded upstream; /robots.txt asks search engines not to crawl this site, and root-level icons, images, and similar static files (for example, /favicon.ico) return 404"
       },
       "healthz": {
         "status": "✅ Custom",
         "notes": "Returns ok if at least one current upstream is healthy; otherwise returns 503"
       },
-      "robots": {
-        "status": "✅ Custom",
-        "notes": "Asks search engines not to crawl this site"
-      },
       "routeStatus": {
         "status": "✅ Aggregated proxy",
         "notes": "Checks if any upstream has cached the given route"
       },
+      "api": {
+        "status": "❌ Unavailable",
+        "notes": "Returns 404 except for /api/route/status; for API docs, route metadata, and similar endpoints, visit an upstream instance directly"
+      },
       "metrics": {
         "status": "🚫 Not public",
         "notes": "Returns 404; request flow is shown in the homepage chart for the last 24 hours"
-      },
-      "openapi": {
-        "status": "❌ Unavailable",
-        "notes": "API docs — visit an upstream instance directly"
-      },
-      "reference": {
-        "status": "❌ Unavailable",
-        "notes": "Interactive API docs UI"
-      },
-      "namespace": {
-        "status": "❌ Unavailable",
-        "notes": "Namespace metadata queries"
-      },
-      "category": {
-        "status": "❌ Unavailable",
-        "notes": "Category queries"
-      },
-      "radar": {
-        "status": "❌ Unavailable",
-        "notes": "Radar rule queries"
-      },
-      "follow": {
-        "status": "❌ Unavailable",
-        "notes": "Follow instance configuration"
-      },
-      "apiRoute": {
-        "status": "❌ Unavailable",
-        "notes": "Business JSON API (apiRoute)"
       }
     }
   },

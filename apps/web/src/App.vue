@@ -25,14 +25,10 @@ const compatibilityRows: CompatibilityRow[] = [
     notesKey: 'compatibility.rows.feed.notes',
   },
   {
-    path: '/',
-    statusKey: 'compatibility.rows.home.status',
-    notesKey: 'compatibility.rows.home.notes',
-  },
-  {
-    path: '/_assets/*, /favicon.ico',
-    statusKey: 'compatibility.rows.localResource.status',
-    notesKey: 'compatibility.rows.localResource.notes',
+    // 首页、静态资源和 robots.txt 都由本站处理、不转发到上游，合并为一条说明。
+    path: '/, /_assets/*, /favicon.ico, /robots.txt',
+    statusKey: 'compatibility.rows.site.status',
+    notesKey: 'compatibility.rows.site.notes',
   },
   {
     path: '/healthz',
@@ -40,54 +36,20 @@ const compatibilityRows: CompatibilityRow[] = [
     notesKey: 'compatibility.rows.healthz.notes',
   },
   {
-    path: '/robots.txt',
-    statusKey: 'compatibility.rows.robots.status',
-    notesKey: 'compatibility.rows.robots.notes',
-  },
-  {
     path: '/api/route/status',
     statusKey: 'compatibility.rows.routeStatus.status',
     notesKey: 'compatibility.rows.routeStatus.notes',
   },
   {
+    // 其余 RSSHub API 在共享路由中统一返回 404，首页只保留一条汇总说明。
+    path: '/api/*',
+    statusKey: 'compatibility.rows.api.status',
+    notesKey: 'compatibility.rows.api.notes',
+  },
+  {
     path: '/metrics',
     statusKey: 'compatibility.rows.metrics.status',
     notesKey: 'compatibility.rows.metrics.notes',
-  },
-  {
-    path: '/api/openapi.json',
-    statusKey: 'compatibility.rows.openapi.status',
-    notesKey: 'compatibility.rows.openapi.notes',
-  },
-  {
-    path: '/api/reference',
-    statusKey: 'compatibility.rows.reference.status',
-    notesKey: 'compatibility.rows.reference.notes',
-  },
-  {
-    path: '/api/namespace, /api/namespace/*',
-    statusKey: 'compatibility.rows.namespace.status',
-    notesKey: 'compatibility.rows.namespace.notes',
-  },
-  {
-    path: '/api/category/*',
-    statusKey: 'compatibility.rows.category.status',
-    notesKey: 'compatibility.rows.category.notes',
-  },
-  {
-    path: '/api/radar/rules, /api/radar/rules/*',
-    statusKey: 'compatibility.rows.radar.status',
-    notesKey: 'compatibility.rows.radar.notes',
-  },
-  {
-    path: '/api/follow/config',
-    statusKey: 'compatibility.rows.follow.status',
-    notesKey: 'compatibility.rows.follow.notes',
-  },
-  {
-    path: '/api/:namespace/:path',
-    statusKey: 'compatibility.rows.apiRoute.status',
-    notesKey: 'compatibility.rows.apiRoute.notes',
   },
 ]
 
