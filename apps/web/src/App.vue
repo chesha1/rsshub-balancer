@@ -170,6 +170,9 @@ onMounted(async () => {
       <p v-else-if="upstreamsLoadState === 'error'" class="muted">
         {{ t('upstreams.error') }}
       </p>
+      <p v-else-if="upstreams.length === 0" class="muted">
+        {{ t('upstreams.empty') }}
+      </p>
       <ul v-else>
         <li v-for="upstream in upstreams" :key="upstream">
           <a :href="upstream" target="_blank" rel="noreferrer">{{ upstream }}</a>

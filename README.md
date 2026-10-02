@@ -26,7 +26,7 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 ### RSSHub 多实例入口
 
-项目会自动维护一组可用的 RSSHub 上游实例，并把普通 RSSHub Feed 路由转发到其中一个上游。Origin 和 Edge 分别每小时拉取 RSSHub 官方实例列表，加入自维护兜底实例，再通过 `/healthz` 筛选可用实例。刷新失败时保留旧列表；没有可用的列表缓存时使用固定兜底实例。
+项目会自动维护一组可用的 RSSHub 上游实例，并把普通 RSSHub Feed 路由转发到其中一个上游。Origin 和 Edge 分别每小时拉取 RSSHub 官方实例列表，加入自维护实例，再通过 `/healthz` 筛选可用实例。刷新失败时保留旧列表。
 
 ### 缓存感知路由
 

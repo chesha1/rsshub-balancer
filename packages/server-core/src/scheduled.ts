@@ -13,9 +13,9 @@ export async function scheduled(): Promise<void> {
       previous = (await redis.getInstances()) ?? []
     } catch {}
     const remote = await upstream.fetchRemoteInstances()
-    // 与 fallback 合并去重后先排除自身，避免健康检查本身触发递归。
+    // 与额外上游合并去重后先排除自身，避免健康检查本身触发递归。
     const merged = upstream.excludeSelfUpstreams([
-      ...new Set([...remote.map(trimSlash), ...config.fallbackUpstreams]),
+      ...new Set([...remote.map(trimSlash), ...config.extraUpstreams]),
     ])
     // 并行健康检查，只保留可用实例
     const checks = await Promise.all(

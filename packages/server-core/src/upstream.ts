@@ -61,9 +61,9 @@ let instancesRefreshPromise: Promise<string[] | undefined> | undefined
 export function cacheInstances(upstreams: readonly string[]): string[] {
   const nowMs = Date.now()
   const cachedUpstreams = excludeSelfUpstreams(upstreams)
-  // 存量快照也可能包含自身；过滤后为空时保留旧快照，无旧值则使用固定 fallback。
+  // 存量快照也可能包含自身；过滤后为空时保留旧快照，无旧值则返回空列表。
   if (cachedUpstreams.length === 0) {
-    return [...(instancesCache?.upstreams ?? config.fallbackUpstreams)]
+    return [...(instancesCache?.upstreams ?? [])]
   }
   instancesCache = {
     upstreams: cachedUpstreams,
@@ -73,19 +73,18 @@ export function cacheInstances(upstreams: readonly string[]): string[] {
   return [...cachedUpstreams]
 }
 
-// 从 Redis 读取实例列表；为空时保留旧缓存，无缓存时仅使用 fallback，不写回 Redis。
+// 从 Redis 读取实例列表；为空时保留旧缓存且不写回 Redis，无缓存时返回空列表。
 async function readInstancesFromRedis(): Promise<string[]> {
   const list = await redis.getInstances()
   if (list && list.length > 0) return cacheInstances(list)
 
   upstreamLogger.warn('redis instances empty; keeping current instances', {
     event: 'redis.instances_cache',
-    outcome: instancesCache ? 'empty_using_cache' : 'empty_using_fallback',
-    upstreamCount:
-      instancesCache?.upstreams.length ?? config.fallbackUpstreams.length,
+    outcome: instancesCache ? 'empty_using_cache' : 'empty_no_upstreams',
+    upstreamCount: instancesCache?.upstreams.length ?? 0,
   })
 
-  return [...(instancesCache?.upstreams ?? config.fallbackUpstreams)]
+  return [...(instancesCache?.upstreams ?? [])]
 }
 
 // 同一进程或 isolate 的冷启动和过期读取共用一个刷新任务，失败时保留旧缓存。
@@ -103,9 +102,8 @@ function ensureInstancesRefresh(): Promise<string[] | undefined> {
           event: 'redis.instances_cache',
           outcome: instancesCache
             ? 'refresh_failed_using_cache'
-            : 'miss_failed_using_fallback',
-          upstreamCount:
-            instancesCache?.upstreams.length ?? config.fallbackUpstreams.length,
+            : 'miss_failed_no_upstreams',
+          upstreamCount: instancesCache?.upstreams.length ?? 0,
           cacheAgeMs: instancesCache
             ? Date.now() - instancesCache.updatedAtMs
             : undefined,
@@ -123,7 +121,7 @@ function ensureInstancesRefresh(): Promise<string[] | undefined> {
   return instancesRefreshPromise
 }
 
-// 600 秒内复用内存缓存；过期请求等待同一次 Redis 读取，完全无缓存时才 fallback。
+// 600 秒内复用内存缓存；过期请求等待同一次 Redis 读取，完全无缓存时返回空列表。
 export async function getUpstreams(): Promise<string[]> {
   const nowMs = Date.now()
   if (instancesCache) {
@@ -133,9 +131,7 @@ export async function getUpstreams(): Promise<string[]> {
   }
 
   const refreshed = await ensureInstancesRefresh()
-  return [
-    ...(refreshed ?? instancesCache?.upstreams ?? config.fallbackUpstreams),
-  ]
+  return [...(refreshed ?? instancesCache?.upstreams ?? [])]
 }
 
 // 在请求内等待失败标记写入；写入异常只记录 warning，不能影响当前请求响应。
@@ -183,6 +179,24 @@ export async function fetchFromUpstream(
   let fetchStartedAt: number | undefined
   try {
     const upstreams = await getUpstreams()
+    // 没有候选实例时直接返回 502，与候选全部被失败标记跳过的情况分开记录。
+    if (upstreams.length === 0) {
+      prepareDurationMs = Date.now() - startedAt
+      upstreamLogger.error('no upstream instances available; skipping fetch', {
+        event: 'upstream.fetch',
+        outcome: 'no_upstreams',
+        status: 502,
+        durationMs: Date.now() - startedAt,
+        prepareDurationMs,
+        upstreamCount: 0,
+      })
+      return {
+        response: new Response('No upstream instances available', {
+          status: 502,
+          headers: { 'content-type': 'text/plain; charset=UTF-8' },
+        }),
+      }
+    }
     const url = new URL(tracedRequest.url)
     const requestPath = url.pathname + url.search
     const pathname = url.pathname

@@ -18,7 +18,8 @@
     "docsLink": "official RSSHub documentation",
     "introAfter": " and checked regularly for health alongside a self-maintained instance. This is the candidate list used by the environment currently serving requests.",
     "loading": "Loading current upstreams…",
-    "error": "The current upstream list is temporarily unavailable."
+    "error": "The current upstream list is temporarily unavailable.",
+    "empty": "No upstream instances are currently available."
   },
   "trafficSankey": {
     "title": "Request Flow in the Last 24 Hours",

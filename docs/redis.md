@@ -11,7 +11,7 @@
 
 业务操作保留原有 `getInstances`、`setInstances`、`getFailedUpstreams`、`markUpstreamFailed`，保留 GET/SET/MGET、JSON 编码及 6 小时失败 TTL。pathname 不含 query。两端不读、复制或回退旧的无前缀 key；切流不交换或清空状态。
 
-上游缓存及刷新 Promise 由 `upstream.ts` 模块保存，当前进程或 isolate 的 HTTP 和定时刷新共用状态；Node 与 Worker 分别运行，缓存自然隔离。600 秒过期后请求等待同一轮读取；空值或读取失败保留旧列表，无旧列表时使用固定 fallback。失败标记在请求内等待写入，写失败 warning 后继续选路，读取失败按未标记处理。`scheduled.ts` 的刷新轮次下载完整列表正文限 15 秒，零健康节点或写入失败不覆盖旧值。
+上游缓存及刷新 Promise 由 `upstream.ts` 模块保存，当前进程或 isolate 的 HTTP 和定时刷新共用状态；Node 与 Worker 分别运行，缓存自然隔离。600 秒过期后请求等待同一轮读取；空值或读取失败保留旧列表，无旧列表时候选为空，代理请求返回 502。失败标记在请求内等待写入，写失败 warning 后继续选路，读取失败按未标记处理。`scheduled.ts` 的刷新轮次下载完整列表正文限 15 秒，零健康节点或写入失败不覆盖旧值。
 
 两端分别限制建连和每条命令为 2 秒，禁用自动重连和离线队列。Node 并发共用建连 Promise；普通命令错误保留健康连接，确认断开后允许后续操作重建。命令时限从提交起覆盖排队、发送与回复。
 
