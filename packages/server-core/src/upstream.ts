@@ -10,6 +10,12 @@ type UpstreamAttemptKind = 'forward' | 'fallback'
 
 type UpstreamPhase = 'prepare' | 'cache_probe' | 'fetch'
 
+// 只有这些状态码表示跳转；304 这类不带跳转目标的 3xx 按普通响应转发。
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+
+// RSSHub 迁移路由通常只有一跳，上限只用于截断异常的跳转链。
+const MAX_UPSTREAM_REDIRECTS = 3
+
 type InstancesCache = {
   upstreams: string[]
   updatedAtMs: number
@@ -150,6 +156,38 @@ async function markFailedUpstream(
       pathname,
       ttlSeconds,
       error: e,
+    })
+  }
+}
+
+// 作为 proxy 的 customFetch，在同一个上游内跟随重定向，返回最终响应供选路判断成败。
+// 各上游的 RSSHub 版本可能不同，同一组路由在不同版本之间可能互相重定向，所以只在发出重定向的上游内跟随。
+// RSSHub 的 Feed 路由只做站内重定向，跳到其他站点通常是实例的授权流程、域名迁移或失效，
+// 订阅客户端用不上，入口也不代为请求其他站点，因此按该上游失败处理。
+async function fetchWithinUpstream(request: Request): Promise<Response> {
+  const { origin } = new URL(request.url)
+  let current = request
+  for (let redirectCount = 0; ; redirectCount++) {
+    const res = await fetch(current)
+    if (!REDIRECT_STATUSES.has(res.status)) return res
+    // 重定向响应本身不会转发，继续请求或判定失败前先释放正文。
+    await cancelResponseBody(res)
+    // Location 可以是相对路径，按当前请求地址解析。
+    const location = res.headers.get('location')
+    const next = location === null ? null : URL.parse(location, current.url)
+    // 跳转目标缺失、无法解析、指向其他站点或超出跳数上限时抛出异常，由调用方按该上游失败处理。
+    if (
+      next === null ||
+      next.origin !== origin ||
+      redirectCount >= MAX_UPSTREAM_REDIRECTS
+    ) {
+      throw new Error('Upstream redirect cannot be followed')
+    }
+    current = new Request(next, {
+      method: current.method,
+      headers: current.headers,
+      redirect: 'manual',
+      signal: current.signal,
     })
   }
 }
@@ -304,6 +342,7 @@ export async function fetchFromUpstream(
           raw: tracedRequest,
           redirect: 'manual',
           signal: AbortSignal.timeout(15000),
+          customFetch: fetchWithinUpstream,
         })
         if (res.status >= 200 && res.status < 400) {
           fetchDurationMs = Date.now() - fetchStartedAt

@@ -40,6 +40,8 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 如果某个上游在处理当前路径时失败，项目会写入有效期为 6 小时的失败标记，并继续尝试其他候选。标记按请求路径和上游区分，不含查询参数；有效期内，同路径请求会跳过该上游。所有候选均被标记或本次尝试全部失败时返回 502。
 
+上游返回重定向时，项目只在同一个上游内跟随，最多 3 跳，按最终响应判断该上游是否成功，成功时直接返回最终内容；指向其他站点的重定向按该上游失败处理。规则和原因见 [上游重定向处理](docs/upstream-redirects.md)。
+
 Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让作用于 RSSHub 上游，与 Watchdog 在 Origin 和 Edge 之间切换入口是两件事。
 
 ### 首页状态与流量观测
@@ -63,7 +65,7 @@ Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让�
 
 | 路径 | 行为 |
 | --- | --- |
-| `/:namespace/:path` | `GET` / `HEAD` 按缓存探测和失败避让结果转发到 RSSHub 上游，其他方法返回 405 |
+| `/:namespace/:path` | `GET` / `HEAD` 按缓存探测和失败避让结果转发到 RSSHub 上游，上游的重定向只在该上游内跟随；其他方法返回 405 |
 | `/` | 自定义首页 |
 | `/_assets/*`、根目录静态文件（如 `/favicon.ico`、`/apple-touch-icon.png`） | 本站资源：`/_assets/*` 下的首页构建产物由 Edge 返回，其余地址在本地返回 404；均不转发到 RSSHub 上游，也不计入统计 |
 | `/healthz` | 任一候选上游的健康接口返回 2xx 且正文为 `ok` 时返回 200，否则返回 503 |
@@ -87,6 +89,7 @@ Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让�
 - [Metrics 查询](docs/metrics.md)
 - [Redis](docs/redis.md)
 - [项目能力边界](docs/capability-boundary.md)
+- [上游重定向处理](docs/upstream-redirects.md)
 - [Node 源站发布策略](docs/origin-release-strategy.md)
 - [Cloudflare 规则](docs/cloudflare.md)
 
