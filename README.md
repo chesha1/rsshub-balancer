@@ -88,6 +88,7 @@ Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让�
 - [Redis](docs/redis.md)
 - [项目能力边界](docs/capability-boundary.md)
 - [Node 源站发布策略](docs/origin-release-strategy.md)
+- [Cloudflare 规则](docs/cloudflare.md)
 
 ## 运行与接管
 

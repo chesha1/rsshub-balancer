@@ -10,41 +10,36 @@
 
 后续优先评估 [AntV G6 的 WebGL 渲染路径](https://g6.antv.antgroup.com/manual/further-reading/renderer)，减少反复栅格化和整图重绘，避免继续围绕 ECharts 参数反复调整。迁移前验证桑基图布局、流量宽度、渐变及现有交互的兼容性，并用真实数据比较性能；当前仅记录待办，尚未实施迁移。
 
-## 拦截安全扫描和漏洞扫描请求
-
-- [ ] 评估在请求进入 RSS 代理之前拦截安全扫描和漏洞扫描请求，不再把它们转发给上游。
-
-`/wp-login.php`、`/.env`、`/.git/config`、`/wp-admin/...` 这类扫描请求既不是本站资源，也不是 RSSHub 路由，目前和普通 RSS 请求一样进入代理：先向候选上游探测缓存，再依次转发，全部失败后返回 502，并记为“请求失败”。现有的本站资源规则只覆盖 `/_assets` 目录和根目录静态文件，不处理这类请求。这样做的问题：
-
-- 在上游看来，这些扫描请求来自本站的出口地址，可能触发上游的防护规则，甚至导致本站被封禁，影响正常订阅。
-- 部分上游会对扫描路径返回 2xx 或 3xx，本站会把这些响应原样转发给扫描器，并记为该上游成功。
-- 扫描路径大多只出现一两次，失败标记很少能起到短路作用，每个新路径都要向所有上游探测并转发一遍。
-- 首页统计和错误日志中混入扫描路径。
-
-2026-09-30 最近 24 小时的数据（按采样权重估算）：按常见扫描器特征粗筛出约 500 次请求，分布在 255 个不同路径上；其中 359 次记为“请求失败”，141 次被上游以 2xx 或 3xx 响应，其中 137 次来自同一个上游。
-
-建议优先使用 Cloudflare WAF 自定义规则，在请求到达 Origin 或 Worker 之前直接拦截。两种运行模式都在同一个 zone 后面，一条规则即可同时生效，也不需要改代码；项目已经用 WAF 限制 ingest 来源，不算新增组件。规则只匹配 RSSHub 路由不会出现的结构特征，例如：
-
-- 以 `/.` 开头的路径，`/.well-known/` 除外；
-- 服务端脚本扩展名，可以用 `http.request.uri.path.extension` 匹配 `php`、`asp`、`aspx`、`jsp`、`cgi`；
-- 以 `/wp-` 或 `/cgi-bin/` 开头的路径。
-
-实施前需要确认：
-
-- 规则不能误拦订阅。2026-09-30 核对时，RSSHub 没有以 `.`、`wp`、`cgi` 开头或包含 `php` 的命名空间；但 `/rsshub/transform/*` 路由会把完整 URL 编码后作为参数，其中 `/rsshub/transform/sitemap/:url` 的最后一段可以直接是目标地址（例如以 `.php` 结尾），按扩展名拦截时要排除这类路由。
-- 不启用 Bot Fight Mode 这类通用的机器人拦截：RSS 阅读器本身就是自动化客户端，可能被一起拦下。
-- 被 WAF 拦截的请求不会进入应用，也不会出现在首页统计中，需要到 Cloudflare 安全事件中查看。WAF 规则和 Worker Routes 一样在 zone 中管理、不在仓库里，需要在 README 中记录规则内容。
-
-如果希望规则进入代码并有测试覆盖，也可以在共享路由中增加一条与本站资源类似的本地拒绝规则，代价是请求仍会到达 Origin 或 Worker。当前仅记录待办，尚未实施。
-
-### 与本站资源同名的变体路径
+## 与本站资源同名的变体路径
 
 - [ ] 让第一段为根目录静态文件名的路径（如 `/favicon.ico/`、`/favicon.ico/x`）也在本地返回 404，不再转发给上游或计入统计。
 
-[utils.ts](../packages/server-core/src/utils.ts) 中的 `isLocalResourcePath()` 按完整路径匹配根目录静态文件，统计的 `path` 却取原始 `pathname` 的第一段（见 [metrics.ts](../packages/server-core/src/metrics.ts) 中的 `getRequestDimensions()`）。`/favicon.ico/`、`/favicon.ico/x`、`/apple-touch-icon.png/x` 这类变体路径不属于本站资源，会和扫描请求一样进入代理：向候选上游探测缓存并依次转发，失败时写入失败标记，带来上面列出的同类问题。它们还会以 `/favicon.ico`、`/apple-touch-icon.png` 计入统计，使公开桑基图出现与本站资源同名的一级路径；[metrics.md](metrics.md) 中“ingest、SQL 查询和首页无需另行过滤静态资源路径”的说法因此并不严格。
+[utils.ts](../packages/server-core/src/utils.ts) 中的 `isLocalResourcePath()` 按完整路径匹配根目录静态文件，统计的 `path` 却取原始 `pathname` 的第一段（见 [metrics.ts](../packages/server-core/src/metrics.ts) 中的 `getRequestDimensions()`）。`/favicon.ico/`、`/favicon.ico/x`、`/apple-touch-icon.png/x` 这类变体路径不属于本站资源，也不在 Cloudflare 扫描规则的拦截范围内，会进入代理：向候选上游探测缓存并依次转发，失败时写入失败标记；在上游看来，这些无效请求都来自本站的出口地址。它们还会以 `/favicon.ico`、`/apple-touch-icon.png` 计入统计，使公开桑基图出现与本站资源同名的一级路径；[metrics.md](metrics.md) 中“ingest、SQL 查询和首页无需另行过滤静态资源路径”的说法因此并不严格。
 
 2026-10-01 通过 GitHub API 核对，RSSHub `lib/routes` 下有 23 个命名空间带 `.`（如 `dev.to`、`last.fm`），但没有以图片、图标、样式、脚本或字体扩展名结尾的，第一段命中根目录静态文件规则的路径不会是有效订阅。这条规则本来就在代码中，建议直接把根目录静态文件的判断改为只看第一段，与统计的一级路径口径一致；改完后 metrics.md 的上述说法即可成立。实施前需要确认：
 
 - 重新核对 RSSHub 命名空间，确认仍没有以这些扩展名结尾的。不能简单按第一段是否含 `.` 判断，否则会误拦 `dev.to` 这类命名空间。
 - 用尾随斜杠、多段路径、大小写和编码字符等边界路径对比新旧规则，确认 `/example/user.png` 这类第一段不是静态文件名的路径仍交给代理。
 - 同步修改 `isLocalResourcePath()` 的注释，以及 README、capability-boundary.md 和 metrics.md 中对根目录静态文件的定义。
+
+## 上游版本不一致导致的重定向循环
+
+- [ ] 不同版本的上游对同一组路由给出方向相反的重定向时，入口不再把客户端引入循环；当前的实例是 `/picnob/user/:id` 与 `/picnob.info/user/:id`。
+
+RSSHub 在 2026-03-10（提交 `8637e63`）把 `/picnob` 重定向到 `/picnob.info`，2026-06-06（提交 `055c5b7`，恢复 picnob）又改为把 `/picnob.info` 重定向到 `/picnob`。当前候选上游的行为分别对应这两个版本，2026-10-02 用 `handiworksofficial` 逐个请求上游：
+
+- `rsshub.rssforever.com`、`rsshub.umzzz.com` 把 `/picnob/user/…` 301 到 `/picnob.info/user/…`，自己的 `/picnob.info/user/…` 返回 503；
+- `hub.slarker.me`、`rsshub.ktachibana.party`、`rsshub.cups.moe`、`rsshub.99010101.xyz` 把 `/picnob.info/user/…` 301 到 `/picnob/user/…`，自己的 `/picnob/user/…` 返回 503 或超时。
+
+入口把上游的 200–399 响应视为成功并原样转发，重定向交给客户端处理，所以这两个路径只要轮到发出 301 的上游就结束选路，稳定返回 301。`Location` 是相对路径，客户端跟随后回到本站，拿到的是反方向的 301。上游响应带 `Cache-Control: public, max-age=300`，Cloudflare 会缓存这些 301，缓存过期后回源得到的仍是 301。实际上没有任何上游能返回这些订阅的内容，入口本应返回 502，现在却让客户端在两个地址之间来回跳转；进入代理的那部分请求还会记为发出 301 的上游成功。
+
+截至 2026-10-02 的最近 24 小时（Cloudflare 分析数据，按采样估算），两个入口域名共约 36.7 万次访客请求，其中约 27.3 万次是 picnob 路径的 301，约占 74%。这些请求涉及 61 个用户、121 个路径，几乎全部来自同一个 UA（Windows 上的 Edge 138）。约 96% 由 Cloudflare 缓存直接返回，其余约 9500 次缓存过期或未命中，进入代理后照常向候选上游探测缓存并转发。
+
+这不是 picnob 独有的问题：RSSHub 以后再用重定向迁移路由，只要上游版本不一致，就可能出现同样的循环。可以考虑由入口在同一个上游内跟随站内重定向，按最终结果判断该上游是否成功。上面的例子里每个上游最终都会失败，入口返回 502，不再形成循环；只要有上游能返回内容，客户端就能直接拿到。实施前需要确认：
+
+- 只跟随 `Location` 为相对路径或指向该上游自身的重定向，并限制跳转次数；指向外部站点的重定向仍交给客户端。
+- 缓存探测、失败标记和指标仍按原始请求路径记录，由跟随后的最终结果决定成功还是失败。
+- 304 这类不带 `Location` 的 3xx 响应保持现有处理。
+- 同步修改 README 和 capability-boundary.md 中“重定向交给客户端处理”的说明。
+
+当前仅记录待办，尚未实施。

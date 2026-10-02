@@ -8,7 +8,7 @@ Worker binding `METRICS` 与查询表名均指向 `rsshub_balancer_request_resul
 
 共享 RSS 代理入口仅对通过方法检查的 GET/HEAD 请求采集指标，不包含首页、本站资源、健康检查、内部接口和入口拒绝；Cloudflare Cache HIT 未进入应用，也不计入。
 
-本站资源指 `/_assets` 目录（`/_assets`、`/_assets/` 及其所有子路径）和根目录静态文件（根目录下只有一个路径段、扩展名为图片、图标、样式、脚本或字体的地址，如 `/favicon.ico`、`/apple-touch-icon.png`），规则见 [utils.ts](../packages/server-core/src/utils.ts) 中的 `isLocalResourcePath()`。共享路由在进入代理前只按请求路径判断，命中后直接返回 404，不触发上游探测、转发、失败标记或指标写入，因此 ingest、SQL 查询和首页无需另行过滤静态资源路径。范围之外的未知路径（包括安全扫描请求）仍会进入代理并照常统计。
+本站资源指 `/_assets` 目录（`/_assets`、`/_assets/` 及其所有子路径）和根目录静态文件（根目录下只有一个路径段、扩展名为图片、图标、样式、脚本或字体的地址，如 `/favicon.ico`、`/apple-touch-icon.png`），规则见 [utils.ts](../packages/server-core/src/utils.ts) 中的 `isLocalResourcePath()`。共享路由在进入代理前只按请求路径判断，命中后直接返回 404，不触发上游探测、转发、失败标记或指标写入，因此 ingest、SQL 查询和首页无需另行过滤静态资源路径。范围之外的未知路径仍会进入代理并照常统计，被 Cloudflare WAF 拦截的扫描请求除外。
 
 采集分为两个时点，但每个请求只写入一个数据点：
 
