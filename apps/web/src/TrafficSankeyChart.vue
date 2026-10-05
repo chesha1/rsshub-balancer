@@ -86,6 +86,17 @@ const sankeyNodeSlotHeight = 22
 const sankeyVerticalPadding = 24
 const sankeyDimensionLimit = 30
 
+// 读取 style.css 在根元素上定义的 CSS 变量。ECharts 在 canvas 上绘制文字，不能引用 CSS 变量，只能传入具体的颜色值。
+function readRootCssVariable(name: string) {
+  return getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim()
+}
+
+// 节点标签与页面文字同色，可以点击跳转上游的节点标签使用页面的链接色。
+const sankeyLabelColor = readRootCssVariable('--color-text-strong')
+const sankeyClickableLabelColor = readRootCssVariable('--color-link')
+
 // 按全部结果的请求量选出头部项，同量时按名称排序，避免刷新后分组抖动。
 function getTopDimensionValues(
   rows: readonly TrafficSankeyRow[],
@@ -328,7 +339,9 @@ const chartOption = computed(() => {
               chartData.value.nodeDepths.get(name) === lastVisibleDepth
                 ? 'left'
                 : 'right',
-            color: getUpstreamUrl(name) ? '#0969da' : '#24292f',
+            color: getUpstreamUrl(name)
+              ? sankeyClickableLabelColor
+              : sankeyLabelColor,
           },
         })).sort((a, b) => b.value - a.value || a.name.localeCompare(b.name)),
         links: chartData.value.links,
@@ -342,7 +355,7 @@ const chartOption = computed(() => {
         bottom: 12,
         left: 16,
         label: {
-          color: '#24292f',
+          color: sankeyLabelColor,
           formatter: (params: { name: string }) => formatNodeName(params.name),
           fontSize: 12,
         },
@@ -365,7 +378,7 @@ const chartOption = computed(() => {
 </script>
 
 <template>
-  <div class="traffic-sankey">
+  <div>
     <div class="traffic-sankey-controls">
       <span :id="columnsLabelId" class="traffic-sankey-controls-label">
         {{ t('trafficSankey.columnsLabel') }}
@@ -402,3 +415,49 @@ const chartOption = computed(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.traffic-sankey-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  align-items: center;
+  margin: 0.85rem 0 0.25rem;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.traffic-sankey-controls-label {
+  color: var(--color-text-strong);
+  font-weight: 600;
+}
+
+.traffic-sankey-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  align-items: center;
+}
+
+/* 收紧 Element Plus 复选框默认的高度和间距，选项之间的距离统一由外层的 gap 控制。 */
+.traffic-sankey-checkboxes :deep(.el-checkbox) {
+  height: auto;
+  margin-right: 0;
+  color: var(--color-text-strong);
+}
+
+.traffic-sankey-checkboxes :deep(.el-checkbox__label) {
+  padding-left: 0.35rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* 画布高度由 chartStyle 按节点数计算，不低于 sankeyMinimumChartHeight。 */
+.traffic-sankey-chart {
+  width: 100%;
+  margin: 0.75rem 0 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+}
+</style>

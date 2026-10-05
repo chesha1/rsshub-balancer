@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { setAppLocale } from './i18n'
+import { getNextLocale, localeNames, setAppLocale } from './i18n'
 import {
   preloadTrafficSankeyChart,
   TrafficSankeyChart,
@@ -14,45 +14,21 @@ import {
 
 type LoadState = 'loading' | 'ready' | 'error'
 
+// id 对应语言包中 compatibility.rows 下的键，每行的状态和说明文案都从该键下读取。
 type CompatibilityRow = {
+  id: string
   path: string
-  statusKey: string
-  notesKey: string
 }
 
 const compatibilityRows: CompatibilityRow[] = [
-  {
-    path: '/:namespace/:path',
-    statusKey: 'compatibility.rows.feed.status',
-    notesKey: 'compatibility.rows.feed.notes',
-  },
-  {
-    // 首页、静态资源和 robots.txt 都由本站处理、不转发到上游，合并为一条说明。
-    path: '/, /_assets/*, /favicon.ico, /robots.txt',
-    statusKey: 'compatibility.rows.site.status',
-    notesKey: 'compatibility.rows.site.notes',
-  },
-  {
-    path: '/healthz',
-    statusKey: 'compatibility.rows.healthz.status',
-    notesKey: 'compatibility.rows.healthz.notes',
-  },
-  {
-    path: '/api/route/status',
-    statusKey: 'compatibility.rows.routeStatus.status',
-    notesKey: 'compatibility.rows.routeStatus.notes',
-  },
-  {
-    // 其余 RSSHub API 在共享路由中统一返回 404，首页只保留一条汇总说明。
-    path: '/api/*',
-    statusKey: 'compatibility.rows.api.status',
-    notesKey: 'compatibility.rows.api.notes',
-  },
-  {
-    path: '/metrics',
-    statusKey: 'compatibility.rows.metrics.status',
-    notesKey: 'compatibility.rows.metrics.notes',
-  },
+  { id: 'feed', path: '/:namespace/:path' },
+  // 首页、静态资源和 robots.txt 都由本站处理、不转发到上游，合并为一条说明。
+  { id: 'site', path: '/, /_assets/*, /favicon.ico, /robots.txt' },
+  { id: 'healthz', path: '/healthz' },
+  { id: 'routeStatus', path: '/api/route/status' },
+  // 其余 RSSHub API 在共享路由中统一返回 404，首页只保留一条汇总说明。
+  { id: 'api', path: '/api/*' },
+  { id: 'metrics', path: '/metrics' },
 ]
 
 // 接口数据只整体替换 .value，shallowRef 只追踪这一层引用，不为每一行建立响应式代理和字段依赖。
@@ -61,17 +37,10 @@ const upstreams = shallowRef<string[]>([])
 const upstreamsLoadState = ref<LoadState>('loading')
 const trafficSankeyRows = shallowRef<TrafficSankeyRow[]>([])
 const trafficSankeyLoadState = ref<LoadState>('loading')
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
-const languageButtonLabel = computed(() =>
-  locale.value === 'zh-CN' ? 'English' : '中文',
-)
-
-// 切换当前前端语言，并把选择持久化到浏览器本地状态。
-function switchLocale() {
-  const nextLocale = locale.value === 'zh-CN' ? 'en-US' : 'zh-CN'
-  setAppLocale(nextLocale)
-}
+// 语言按钮显示目标语言的名称，点击后切换到该语言并持久化选择。
+const nextLocale = computed(() => getNextLocale())
 
 // 从公开 UI 数据接口加载实例列表；失败时只影响首页展示，不改变路由行为。
 async function loadUpstreams() {
@@ -119,13 +88,11 @@ async function loadTrafficSankey() {
   }
 }
 
-onMounted(async () => {
-  // 两个数据请求先发出，图表包随后开始下载；图表等待的是统计请求和图表包中较慢的一项。
-  await Promise.all([
-    loadUpstreams(),
-    loadTrafficSankey(),
-    preloadTrafficSankeyChart(),
-  ])
+onMounted(() => {
+  // 三个加载函数都在内部处理失败，这里只负责发起。两个数据请求先发出，图表包随后开始下载；图表等待的是统计请求和图表包中较慢的一项。
+  loadUpstreams()
+  loadTrafficSankey()
+  preloadTrafficSankeyChart()
 })
 </script>
 
@@ -136,13 +103,13 @@ onMounted(async () => {
         class="language-toggle"
         native-type="button"
         :aria-label="t('language.switchAria')"
-        @click="switchLocale"
+        @click="setAppLocale(nextLocale)"
       >
-        {{ languageButtonLabel }}
+        {{ localeNames[nextLocale] }}
       </ElButton>
     </div>
 
-    <section class="language-section" aria-labelledby="page-title">
+    <section aria-labelledby="page-title">
       <h1 id="page-title">{{ t('hero.title') }}</h1>
       <p>{{ t('hero.summary') }}</p>
 
@@ -227,12 +194,12 @@ onMounted(async () => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in compatibilityRows" :key="row.path">
+          <tr v-for="row in compatibilityRows" :key="row.id">
             <td>
               <code>{{ row.path }}</code>
             </td>
-            <td>{{ t(row.statusKey) }}</td>
-            <td>{{ t(row.notesKey) }}</td>
+            <td>{{ t(`compatibility.rows.${row.id}.status`) }}</td>
+            <td>{{ t(`compatibility.rows.${row.id}.notes`) }}</td>
           </tr>
         </tbody>
       </table>

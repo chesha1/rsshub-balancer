@@ -2,9 +2,19 @@
   box-sizing: border-box;
 }
 
+/* 页面配色集中定义在根元素上。桑基图在 canvas 上绘制，图表文字的颜色由 TrafficSankeyChart.vue 在运行时读取这里的变量。 */
 :root {
-  color: #333;
-  background: #fff;
+  --color-text: #333;
+  --color-text-strong: #24292f;
+  --color-text-muted: #57606a;
+  --color-link: #0969da;
+  --color-border: #d0d7de;
+  --color-background: #fff;
+  --color-background-subtle: #f6f8fa;
+  --color-code-background: #eff1f3;
+
+  color: var(--color-text);
+  background: var(--color-background);
   font-family:
     system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -17,11 +27,11 @@
 body {
   margin: 0;
   min-width: 320px;
-  background: #fff;
+  background: var(--color-background);
 }
 
 a {
-  color: #0969da;
+  color: var(--color-link);
   text-decoration: none;
 }
 
@@ -43,10 +53,6 @@ a:hover {
 
 .language-toggle {
   min-width: 5rem;
-}
-
-.language-section {
-  min-width: 0;
 }
 
 h1 {
@@ -76,72 +82,19 @@ li {
 }
 
 .muted {
-  color: #57606a;
-}
-
-.traffic-sankey {
-  min-width: 0;
-}
-
-.traffic-sankey-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.85rem;
-  align-items: center;
-  margin: 0.85rem 0 0.25rem;
-  color: #57606a;
-  font-size: 0.9rem;
-}
-
-.traffic-sankey-controls-label {
-  color: #24292f;
-  font-weight: 600;
-}
-
-.traffic-sankey-checkboxes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.8rem;
-  align-items: center;
-}
-
-.traffic-sankey-checkboxes .el-checkbox {
-  height: auto;
-  margin-right: 0;
-  color: #24292f;
-}
-
-.traffic-sankey-checkboxes .el-checkbox__label {
-  padding-left: 0.35rem;
-  font-size: 0.9rem;
-  line-height: 1.4;
-}
-
-.traffic-sankey-chart {
-  width: 100%;
-  min-height: 360px;
-  margin: 0.75rem 0 1rem;
-  border: 1px solid #d0d7de;
-  border-radius: 6px;
-  background: #fff;
+  color: var(--color-text-muted);
 }
 
 .note {
   margin-top: 1.5rem;
   padding: 0.75rem 1rem;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  background: #f6f8fa;
+  background: var(--color-background-subtle);
 }
 
 .note p {
   margin: 0.5rem 0;
-}
-
-hr {
-  margin: 2rem 0;
-  border: 0;
-  border-top: 1px solid #d0d7de;
 }
 
 table {
@@ -154,19 +107,19 @@ table {
 th,
 td {
   padding: 0.4rem 0.6rem;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--color-border);
   text-align: left;
   vertical-align: top;
 }
 
 th {
-  background: #f6f8fa;
+  background: var(--color-background-subtle);
 }
 
 code {
   padding: 0.15rem 0.35rem;
   border-radius: 3px;
-  background: #eff1f3;
+  background: var(--color-code-background);
   font-size: 0.85em;
 }
 
