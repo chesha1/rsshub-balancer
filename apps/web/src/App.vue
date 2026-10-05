@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ChartError from './ChartError.vue'
-import ChartLoading from './ChartLoading.vue'
 import { setAppLocale } from './i18n'
+import {
+  preloadTrafficSankeyChart,
+  TrafficSankeyChart,
+} from './trafficSankeyChartLoader'
 import {
   trafficSankeyResponseSchema,
   type TrafficSankeyRow,
@@ -58,14 +60,6 @@ const upstreamsLoadState = ref<LoadState>('loading')
 const trafficSankeyRows = ref<TrafficSankeyRow[]>([])
 const trafficSankeyLoadState = ref<LoadState>('loading')
 const { t, locale } = useI18n()
-
-const TrafficSankeyChart = defineAsyncComponent({
-  // 只有统计成功且非空时才渲染图表，把图表依赖移出首页启动路径。
-  loader: () => import('./TrafficSankeyChart.vue'),
-  loadingComponent: ChartLoading,
-  errorComponent: ChartError,
-  delay: 0,
-})
 
 const languageButtonLabel = computed(() =>
   locale.value === 'zh-CN' ? 'English' : '中文',
@@ -124,7 +118,12 @@ async function loadTrafficSankey() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadUpstreams(), loadTrafficSankey()])
+  // 两个数据请求先发出，图表包随后开始下载；图表等待的是统计请求和图表包中较慢的一项。
+  await Promise.all([
+    loadUpstreams(),
+    loadTrafficSankey(),
+    preloadTrafficSankeyChart(),
+  ])
 })
 </script>
 
