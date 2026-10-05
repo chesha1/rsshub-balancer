@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { setAppLocale } from './i18n'
 import {
@@ -55,9 +55,11 @@ const compatibilityRows: CompatibilityRow[] = [
   },
 ]
 
-const upstreams = ref<string[]>([])
+// 接口数据只整体替换 .value，shallowRef 只追踪这一层引用，不为每一行建立响应式代理和字段依赖。
+// 原地修改数组或行对象不会触发更新。
+const upstreams = shallowRef<string[]>([])
 const upstreamsLoadState = ref<LoadState>('loading')
-const trafficSankeyRows = ref<TrafficSankeyRow[]>([])
+const trafficSankeyRows = shallowRef<TrafficSankeyRow[]>([])
 const trafficSankeyLoadState = ref<LoadState>('loading')
 const { t, locale } = useI18n()
 
