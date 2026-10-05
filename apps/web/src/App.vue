@@ -7,8 +7,8 @@ import {
   TrafficSankeyChart,
 } from './trafficSankeyChartLoader'
 import {
-  trafficSankeyResponseSchema,
   type TrafficSankeyRow,
+  trafficSankeyResponseSchema,
   upstreamsResponseSchema,
 } from './types'
 
@@ -132,14 +132,14 @@ onMounted(async () => {
 <template>
   <main class="page-shell">
     <div class="page-toolbar">
-      <el-button
+      <ElButton
         class="language-toggle"
         native-type="button"
         :aria-label="t('language.switchAria')"
         @click="switchLocale"
       >
         {{ languageButtonLabel }}
-      </el-button>
+      </ElButton>
     </div>
 
     <section class="language-section" aria-labelledby="page-title">
@@ -176,7 +176,9 @@ onMounted(async () => {
       </p>
       <ul v-else>
         <li v-for="upstream in upstreams" :key="upstream">
-          <a :href="upstream" target="_blank" rel="noreferrer">{{ upstream }}</a>
+          <a :href="upstream" target="_blank" rel="noreferrer">
+            {{ upstream }}
+          </a>
         </li>
       </ul>
 

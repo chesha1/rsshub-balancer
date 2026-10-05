@@ -10,9 +10,9 @@ import {
 } from 'element-plus/es/components/checkbox/index'
 import 'element-plus/es/components/checkbox/style/css'
 import 'element-plus/es/components/checkbox-group/style/css'
-import { computed, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { computed, ref, useId } from 'vue'
 import VChart from 'vue-echarts'
+import { useI18n } from 'vue-i18n'
 import type { TrafficSankeyRow } from './types'
 
 type TrafficSankeyColumn = 'country' | 'path' | 'upstream'
@@ -61,7 +61,9 @@ const trafficSankeyColumns = [
 const selectedColumns = ref<TrafficSankeyColumn[]>([...trafficSankeyColumns])
 const chartAriaLabel = computed(() => t('trafficSankey.chartAria'))
 const chartLocaleKey = computed(() => `traffic-sankey-${locale.value}`)
-const controlsAriaLabel = computed(() => t('trafficSankey.columnsAria'))
+// 复选框组用 aria-labelledby 引用可见的“显示列”文字，读屏软件读出的分组名称与页面一致；
+// aria-labelledby 优先于 Element Plus 默认填入的 aria-label。
+const columnsLabelId = useId()
 const requestCountLabel = computed(() => t('trafficSankey.tooltipRequests'))
 const columnOptions = computed(() =>
   trafficSankeyColumns.map((value) => ({
@@ -98,8 +100,9 @@ function getTopDimensionValues(
 
   return new Set(
     [...totals]
-      .sort(([nameA, valueA], [nameB, valueB]) =>
-        valueB - valueA || nameA.localeCompare(nameB),
+      .sort(
+        ([nameA, valueA], [nameB, valueB]) =>
+          valueB - valueA || nameA.localeCompare(nameB),
       )
       .slice(0, sankeyDimensionLimit)
       .map(([name]) => name),
@@ -205,9 +208,7 @@ function aggregateSankeyRows(
   const linksByKey = new Map<string, SankeyLink>()
   const nodeValues = new Map<string, number>()
   const nodeDepths = new Map<string, number>()
-  const columnDepths = new Map(
-    columns.map((column, index) => [column, index]),
-  )
+  const columnDepths = new Map(columns.map((column, index) => [column, index]))
 
   for (const row of rows) {
     if (row.value <= 0) {
@@ -365,27 +366,23 @@ const chartOption = computed(() => {
 
 <template>
   <div class="traffic-sankey">
-    <div
-      class="traffic-sankey-controls"
-      role="group"
-      :aria-label="controlsAriaLabel"
-    >
-      <span class="traffic-sankey-controls-label">
+    <div class="traffic-sankey-controls">
+      <span :id="columnsLabelId" class="traffic-sankey-controls-label">
         {{ t('trafficSankey.columnsLabel') }}
       </span>
-      <el-checkbox-group
+      <ElCheckboxGroup
         v-model="selectedColumns"
         class="traffic-sankey-checkboxes"
-        :aria-label="controlsAriaLabel"
+        :aria-labelledby="columnsLabelId"
       >
-        <el-checkbox
+        <ElCheckbox
           v-for="option in columnOptions"
           :key="option.value"
           :value="option.value"
         >
           {{ option.label }}
-        </el-checkbox>
-      </el-checkbox-group>
+        </ElCheckbox>
+      </ElCheckboxGroup>
     </div>
     <p
       v-if="selectedColumnSet.has('country') || selectedColumnSet.has('path')"
