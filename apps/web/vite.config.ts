@@ -15,6 +15,11 @@ export default defineConfig({
     vue(),
     VueI18nPlugin({
       include: [localeResources],
+      // 语言包在构建时已预编译，运行时不打包消息编译器；
+      // 文案都要写进 src/locales，不能在运行时传入待编译的字符串消息，例如 t() 的默认消息。
+      dropMessageCompiler: true,
+      // 不全局注册 <i18n-t>、v-t 等内置组件和指令，需要 <i18n-t> 时在组件中从 vue-i18n 局部引入 I18nT。
+      fullInstall: false,
     }),
   ],
   server: {
