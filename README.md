@@ -145,6 +145,8 @@ Node 本地开发使用 `apps/origin/.env`，从 [apps/origin/.env.example](apps
 
 `pnpm build:edge` 先构建首页，再通过 [Worker Vite 配置](apps/edge/vite.config.ts) 和官方 Cloudflare 插件生成 `dist/apps/edge/server/index.js`、独立 Redis SDK 模块及 `public/` 静态资源。Worker 开启 `new_module_registry`，首次访问 Redis 时才导入 SDK，ingest 不加载它；模块缓存不会复用 Redis 连接。`pnpm deploy:edge`（兼容命令 `pnpm deploy`）先构建，再使用生成的 `server/wrangler.json` 发布，保留 `no_bundle` 和模块规则，避免再次合包；Worker 与首页仍一起发布。
 
+首页静态资源的响应头由 [apps/web/public/_headers](apps/web/public/_headers) 配置，随首页产物进入 Worker 静态资源目录：带内容哈希的 `/_assets/*` 允许浏览器缓存一年且不再校验，`/` 返回的首页 HTML 保持平台默认的每次重新校验。规则只作用于 Worker 的静态资源响应，在部署后和构建产物预览（`pnpm build:edge` 后在 `apps/edge` 执行 `pnpm exec vite preview`）中生效；`pnpm dev:edge` 由 Vite 开发服务直接返回文件，不应用这些规则。
+
 Node 收到终止信号后直接退出，允许中断未完成请求并丢失未上传指标。Docker 运行时使用 `--init`，Compose 设置 `init: true`，由轻量 init 转发信号，避免 Node 直接作为 PID 1 忽略停止信号。发布与回滚约定见 [Node 源站发布策略](docs/origin-release-strategy.md)。
 
 ### Origin 镜像 CI
