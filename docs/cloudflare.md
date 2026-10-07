@@ -85,3 +85,9 @@ http.host in {"rsshub-balancer.virworks.moe" "rsshub-balancer-origin.virworks.mo
 RSS 阅读器本身就是自动化客户端，会被浏览器完整性检查误拦，也无法完成 I'm Under Attack 的质询。配置规则优先于 zone 级设置，即使整个 zone 开启 I'm Under Attack，这两个主机也不受影响。
 
 Bot Fight Mode 同样会质询自动化客户端，但它不经过规则引擎，无法用规则为这两个主机排除，因此 zone 中保持关闭。
+
+## Web Analytics
+
+`rsshub-balancer.virworks.moe` 启用了 Web Analytics 自动注入：Cloudflare 在返回给浏览器的首页 HTML 中插入 `https://static.cloudflareinsights.com/beacon.min.js/...` 脚本，统计数据回传本站 `/cdn-cgi/rum`。
+
+首页 CSP（[apps/web/public/_headers](../apps/web/public/_headers)）为此在 `script-src` 中放行 `https://static.cloudflareinsights.com`，回传请求已包含在 `connect-src 'self'` 中。关闭自动注入后可以移除该来源；改为手动接入时数据发往 `cloudflareinsights.com`，需要在 `connect-src` 中放行该域名。开启其他会向 HTML 注入脚本的功能（如 Rocket Loader、Email Address Obfuscation）前，也要先调整首页 CSP，否则注入的脚本会被浏览器拦截。
