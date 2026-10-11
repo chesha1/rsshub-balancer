@@ -4,7 +4,8 @@ export const WORKER_NAME = 'rsshub-balancer'
 export const CATCH_ALL = `${HOST}/*`
 export const APP_HEADER = 'X-RSSHub-App'
 // 业务探针全部通过才算健康；新增探针只需向列表追加路由。
-export const FEED_PATHS = ['/openai/news', '/github/issue/DIYgod/RSSHub']
+// /test/1 由上游本地生成 RSS，验证选路和转发链路；OpenAI 路由保留真实抓取检查。
+export const FEED_PATHS = ['/openai/news', '/test/1']
 
 // 每次完整探测最多等待 30 秒，包含健康接口与所有业务 Feed 的完整正文读取。
 export const PROBE_TIMEOUT_MS = 30_000
