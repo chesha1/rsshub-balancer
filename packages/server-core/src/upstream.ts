@@ -16,6 +16,12 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 // RSSHub 迁移路由通常只有一跳，上限只用于截断异常的跳转链。
 const MAX_UPSTREAM_REDIRECTS = 3
 
+// 排除自身以避免递归；cups 的 200 Challenge 页面会被误当作成功 Feed，先停用该实例。
+const EXCLUDED_UPSTREAM_HOSTS = new Set([
+  'rsshub-balancer.virworks.moe',
+  'rsshub.cups.moe',
+])
+
 type InstancesCache = {
   upstreams: string[]
   updatedAtMs: number
@@ -27,12 +33,12 @@ export type UpstreamFetchResult = {
   upstream?: string
 }
 
-// 按 hostname 排除本服务，协议、端口、大小写和域名末尾点不能绕过检查。
-export function excludeSelfUpstreams(upstreams: readonly string[]): string[] {
+// 统一过滤远程列表和存量快照，协议、端口、大小写和域名末尾点不能绕过排除规则。
+export function filterUpstreams(upstreams: readonly string[]): string[] {
   return upstreams.filter((upstream) => {
     try {
       const hostname = new URL(upstream).hostname.replace(/\.$/, '')
-      return hostname !== 'rsshub-balancer.virworks.moe'
+      return !EXCLUDED_UPSTREAM_HOSTS.has(hostname)
     } catch {
       // 无效 URL 无法作为 HTTP 上游，避免它绕过候选检查进入探测。
       return false
@@ -56,7 +62,7 @@ export async function fetchRemoteInstances(): Promise<string[]> {
   for (const m of matches) {
     urls.push(trimSlash(m[1]))
   }
-  return excludeSelfUpstreams(urls)
+  return filterUpstreams(urls)
 }
 
 // 模块内缓存由当前进程或 isolate 的 HTTP 与定时刷新共用，两端独立运行。
@@ -66,8 +72,8 @@ let instancesRefreshPromise: Promise<string[] | undefined> | undefined
 // 更新当前运行时的 instances 内存缓存，用于请求热路径复用最近一次非空列表。
 export function cacheInstances(upstreams: readonly string[]): string[] {
   const nowMs = Date.now()
-  const cachedUpstreams = excludeSelfUpstreams(upstreams)
-  // 存量快照也可能包含自身；过滤后为空时保留旧快照，无旧值则返回空列表。
+  const cachedUpstreams = filterUpstreams(upstreams)
+  // 存量快照也可能包含被排除的实例；过滤后为空时保留已过滤的旧快照，无旧值则返回空列表。
   if (cachedUpstreams.length === 0) {
     return [...(instancesCache?.upstreams ?? [])]
   }

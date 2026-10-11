@@ -13,8 +13,8 @@ export async function scheduled(): Promise<void> {
       previous = (await redis.getInstances()) ?? []
     } catch {}
     const remote = await upstream.fetchRemoteInstances()
-    // 与额外上游合并去重后先排除自身，避免健康检查本身触发递归。
-    const merged = upstream.excludeSelfUpstreams([
+    // 与额外上游合并去重后先过滤被排除的实例，避免探测自身或已停用的上游。
+    const merged = upstream.filterUpstreams([
       ...new Set([...remote.map(trimSlash), ...config.extraUpstreams]),
     ])
     // 并行健康检查，只保留可用实例
