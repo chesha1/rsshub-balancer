@@ -1,4 +1,5 @@
 import { proxy } from 'hono/proxy'
+import { readCacheStatus } from './cache-status'
 import { config } from './config'
 import { upstreamLogger, withRequestId } from './log'
 import * as redis from './redis'
@@ -16,11 +17,8 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 // RSSHub 迁移路由通常只有一跳，上限只用于截断异常的跳转链。
 const MAX_UPSTREAM_REDIRECTS = 3
 
-// 排除自身以避免递归；cups 的 200 Challenge 页面会被误当作成功 Feed，先停用该实例。
-const EXCLUDED_UPSTREAM_HOSTS = new Set([
-  'rsshub-balancer.virworks.moe',
-  'rsshub.cups.moe',
-])
+// 排除自身以避免递归；其他实例统一通过健康筛选与响应检查决定是否可用。
+const EXCLUDED_UPSTREAM_HOSTS = new Set(['rsshub-balancer.virworks.moe'])
 
 type InstancesCache = {
   upstreams: string[]
@@ -175,7 +173,13 @@ async function fetchWithinUpstream(request: Request): Promise<Response> {
   let current = request
   for (let redirectCount = 0; ; redirectCount++) {
     const res = await fetch(current)
-    if (!REDIRECT_STATUSES.has(res.status)) return res
+    // 明确 Challenge 即使带跳转状态也交给外层拒绝，避免跟随后丢失标记或误用普通失败 TTL。
+    if (
+      !REDIRECT_STATUSES.has(res.status) ||
+      responseRejectionReason(res) === 'challenge_header'
+    ) {
+      return res
+    }
     // 重定向响应本身不会转发，继续请求或判定失败前先释放正文。
     await cancelResponseBody(res)
     // Location 可以是相对路径，按当前请求地址解析。
@@ -196,6 +200,36 @@ async function fetchWithinUpstream(request: Request): Promise<Response> {
       signal: current.signal,
     })
   }
+}
+
+// 明确 Challenge 优先于 HTTP 状态；其余仅拦截原本可成功转发、且允许携带正文的 HTML。
+function responseRejectionReason(
+  response: Response,
+): 'challenge_header' | 'unexpected_html' | undefined {
+  if (
+    response.headers.get('cf-mitigated')?.trim().toLowerCase() === 'challenge'
+  ) {
+    return 'challenge_header'
+  }
+  // 无正文状态的 Content-Type 不能证明内容异常；HEAD 仍按可用的响应头判断。
+  if (
+    response.status < 200 ||
+    response.status >= 400 ||
+    response.status === 204 ||
+    response.status === 205 ||
+    response.status === 304
+  ) {
+    return undefined
+  }
+  const contentType = response.headers
+    .get('content-type')
+    ?.split(';', 1)[0]
+    .trim()
+    .toLowerCase()
+  if (contentType === 'text/html' || contentType === 'application/xhtml+xml') {
+    return 'unexpected_html'
+  }
+  return undefined
 }
 
 // 按优先级依次尝试上游实例，返回首个成功响应及其上游；失败只返回 502，不归因到失败实例。
@@ -287,12 +321,11 @@ export async function fetchFromUpstream(
     const probeResults = await Promise.allSettled(
       orderedUpstreams.map(async (upstream) => {
         const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
-        const check = await fetch(statusUrl, {
-          signal: AbortSignal.timeout(1000),
-        })
-        // 探测只用状态码，命中与未命中的正文都不进入后续转发。
-        await cancelResponseBody(check)
-        return check.status === 200 ? upstream : undefined
+        const signal = AbortSignal.timeout(1000)
+        const check = await fetch(statusUrl, { signal })
+        // 连接和 JSON 正文读取共用请求的 1 秒超时；异常不排除实际转发。
+        const status = await readCacheStatus(check)
+        return status ? upstream : undefined
       }),
     )
     const hitUpstreams = new Set<string>()
@@ -343,14 +376,35 @@ export async function fetchFromUpstream(
       } else {
         fallbackAttemptCount += 1
       }
+      let failureTtl = config.failTtl
       try {
+        let originalResponse: Response | undefined
         const res = await proxy(upstream + requestPath, {
           raw: tracedRequest,
           redirect: 'manual',
           signal: AbortSignal.timeout(15000),
-          customFetch: fetchWithinUpstream,
+          // 保存原始响应头，避免 proxy 按 Connection 清理头部后丢失 Challenge 或 HTML 标记。
+          customFetch: async (request) => {
+            originalResponse = await fetchWithinUpstream(request)
+            return originalResponse
+          },
         })
-        if (res.status >= 200 && res.status < 400) {
+        const checkedResponse = originalResponse ?? res
+        const rejectionReason = responseRejectionReason(checkedResponse)
+        if (rejectionReason) {
+          failureTtl = config.invalidResponseTtl
+          upstreamLogger.warn(
+            'upstream response rejected; trying next upstream',
+            {
+              event: 'upstream.response_rejected',
+              upstream,
+              status: res.status,
+              contentType: checkedResponse.headers.get('content-type'),
+              reason: rejectionReason,
+              ttlSeconds: failureTtl,
+            },
+          )
+        } else if (res.status >= 200 && res.status < 400) {
           fetchDurationMs = Date.now() - fetchStartedAt
           upstreamLogger.info('upstream fetch completed', {
             event: 'upstream.fetch',
@@ -387,7 +441,8 @@ export async function fetchFromUpstream(
       // 仅在当前路由尚未标记该上游失败时才写入，减少重复 Redis 写入。
       if (!failedUpstreams.has(upstream)) {
         failedUpstreams.add(upstream)
-        await markFailedUpstream(upstream, pathname, config.failTtl)
+        // 内容异常与普通失败共用一次写入，避免短 TTL 被随后覆盖成 6 小时。
+        await markFailedUpstream(upstream, pathname, failureTtl)
       }
     }
 

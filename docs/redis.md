@@ -9,7 +9,11 @@
 | Node | 每进程复用单 client，HTTP 与每小时刷新共用 | `node:instances` | `node:fail:<encoded-pathname>:<encoded-upstream>` |
 | Worker | 每命令连接、执行并销毁，不跨请求共享 socket | `worker:instances` | `worker:fail:<encoded-pathname>:<encoded-upstream>` |
 
-业务操作保留原有 `getInstances`、`setInstances`、`getFailedUpstreams`、`markUpstreamFailed`，保留 GET/SET/MGET、JSON 编码及 6 小时失败 TTL。pathname 不含 query。两端不读、复制或回退旧的无前缀 key；切流不交换或清空状态。
+业务操作保留原有 `getInstances`、`setInstances`、`getFailedUpstreams`、`markUpstreamFailed`，使用 GET/SET/MGET 和 JSON 编码。失败标记共用上表的 key，动态段编码方式不变，pathname 不含 query，GET/HEAD 与同路径的不同输出格式共用标记。两端不读、复制或回退旧的无前缀 key；切流不交换或清空状态。
+
+实际转发遇到明确 Challenge 或异常 HTML 时，使用 `invalidResponseTtl: 300` 秒；其他 HTTP 错误、连接失败、超时和重定向错误使用 `failTtl: 21600` 秒，判定规则见 [上游响应校验](upstream-response-validation.md)。每次失败只写一次，缓存状态探测异常不写业务失败标记。命中已有标记直接跳过且不续期，过期后由后续请求重新尝试。
+
+长短 TTL 都通过现有无条件 `SET EX` 写入；并发时最后一次实际写入决定 TTL，可能覆盖较长或较短的记录，不做 TTL 合并。
 
 上游缓存及刷新 Promise 由 `upstream.ts` 模块保存，当前进程或 isolate 的 HTTP 和定时刷新共用状态；Node 与 Worker 分别运行，缓存自然隔离。600 秒过期后请求等待同一轮读取；空值或读取失败保留旧列表，无旧列表时候选为空，代理请求返回 502。失败标记在请求内等待写入，写失败 warning 后继续选路，读取失败按未标记处理。`scheduled.ts` 的刷新轮次下载完整列表正文限 15 秒，零健康节点或写入失败不覆盖旧值。
 

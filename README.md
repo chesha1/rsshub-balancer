@@ -32,15 +32,17 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 在真正请求上游之前，项目会先查询各个 RSSHub 实例的 `/api/route/status`，判断哪个实例已经缓存了当前路由。命中缓存时，会优先把请求转发给已有缓存的实例，让它直接返回缓存内容，而不是让另一个实例重新抓取原始网站。
 
-探测并发进行，每个实例最多等待 1 秒；全部探测完成或超时后，从时限内返回命中的实例中等概率随机选择首个请求目标。若没有命中，则随机尝试可用实例。探测超时仅表示未确认缓存，不会排除该实例参与后续请求。
+探测并发进行，每个实例最多等待 1 秒，包含 JSON 读取与校验。全部探测完成或超时后，从确认命中的实例中等概率随机选择首个请求目标；若没有命中，则随机尝试可用实例。探测异常仅表示未确认缓存，不写业务失败标记，也不排除该实例参与后续请求。
 
 这也是本项目最核心的目标：不是做通用负载均衡，而是围绕 RSSHub 已有缓存做一层轻量选择。
 
 ### 简单失败兜底
 
-如果某个上游在处理当前路径时失败，项目会写入有效期为 6 小时的失败标记，并继续尝试其他候选。标记按请求路径和上游区分，不含查询参数；有效期内，同路径请求会跳过该上游。所有候选均被标记或本次尝试全部失败时返回 502。
+如果某个上游在处理当前路径时失败，项目会写入失败标记，并继续尝试其他候选。明确 Challenge 或异常 HTML 使用 300 秒 TTL，其他 HTTP 错误、连接失败、超时和重定向错误使用 21600 秒。二者共用按请求路径和上游区分的 key，不含查询参数，GET/HEAD 共用；有效期内直接跳过且不续期，过期后可重试。所有候选均被标记或本次尝试全部失败时返回 502。
 
 上游返回重定向时，项目只在同一个上游内跟随，最多 3 跳，按最终响应判断该上游是否成功，成功时直接返回最终内容；指向其他站点的重定向按该上游失败处理。规则和原因见 [上游重定向处理](docs/upstream-redirects.md)。
+
+所有候选统一拒绝明确 Challenge 和 HTML 响应，随后尝试其他上游；正常 Feed 保持流式转发。缓存命中条件与响应检查规则见 [上游响应校验](docs/upstream-response-validation.md)。
 
 Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让作用于 RSSHub 上游，与 Watchdog 在 Origin 和 Edge 之间切换入口是两件事。
 
@@ -70,11 +72,13 @@ Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让�
 | `/_assets/*`、根目录静态文件（如 `/favicon.ico`、`/apple-touch-icon.png`） | 本站资源：`/_assets/*` 下的首页构建产物由 Edge 返回，其余地址在本地返回 404；均不转发到 RSSHub 上游，也不计入统计 |
 | `/healthz` | 任一候选上游的健康接口返回 2xx 且正文为 `ok` 时返回 200，否则返回 503 |
 | `/robots.txt` | 禁止搜索引擎索引 |
-| `/api/route/status` | 聚合查询任一上游是否已缓存指定路由 |
+| `/api/route/status` | 使用与内部探测相同的校验，每个上游最多等待 5 秒，返回确认命中的规范 JSON；未确认命中时返回 404 和 `{ cached: false, lastBuildDate: null }`，不代表所有上游确实没有缓存 |
 | `/metrics` | 不对外开放，指标写入 Workers Analytics Engine |
 | `/api/openapi.json`、`/api/reference` 等元数据接口 | 不对外提供，请直接访问上游 RSSHub 实例 |
 
 根目录静态文件指根目录下只有一个路径段、扩展名为图片、图标、样式、脚本或字体的地址（`ico`、`png`、`jpg`、`jpeg`、`gif`、`webp`、`avif`、`svg`、`css`、`js`、`mjs`、`woff`、`woff2`、`ttf`、`otf`、`eot`，不区分大小写），与 `/_assets` 目录一起归本站所有。归属只看请求路径，不看查询字符串和请求头；带后续路径段的地址（如 `/example/user.png`）和其他扩展名（如 `/feed.xml`）仍按普通 Feed 路由代理。
+
+上游合法的 HTML 调试页也不在支持范围内；正常 RSS、Atom、JSON、纯文本和空 Feed 均可转发。
 
 长期 Worker Routes 不包含根目录文件：即使把 `/favicon.ico` 等文件加入首页构建产物，也只有 `pnpm dev:edge` 和故障接管期间能访问，日常运行时仍由 Origin 返回 404。需要提供这类文件时，须同时增加对应的 Worker Route，见[运行与接管](#运行与接管)。
 
@@ -90,6 +94,7 @@ Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让�
 - [Redis](docs/redis.md)
 - [项目能力边界](docs/capability-boundary.md)
 - [上游重定向处理](docs/upstream-redirects.md)
+- [上游响应校验](docs/upstream-response-validation.md)
 - [Node 源站发布策略](docs/origin-release-strategy.md)
 - [Cloudflare 规则](docs/cloudflare.md)
 

@@ -5,6 +5,8 @@ export const config = {
   extraUpstreams: ['https://rsshub.99010101.xyz'].map(trimSlash),
   /** instances 内存缓存有效期（秒），过期请求等待同一轮 Redis 读取。 */
   instancesRefreshIntervalSeconds: 600,
-  /** 上游失败记录在状态存储中的过期时间（秒） */
+  /** HTTP 错误、超时等普通上游失败记录的过期时间（秒）。 */
   failTtl: 21600,
+  /** 明确 Challenge 或意外 HTML 响应的失败记录过期时间（秒）。 */
+  invalidResponseTtl: 300,
 }

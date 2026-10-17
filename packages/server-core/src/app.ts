@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { proxy } from 'hono/proxy'
+import { readCacheStatus } from './cache-status'
 import * as metrics from './metrics'
 import { internalRoutes } from './routes/internal'
 import * as upstream from './upstream'
@@ -54,26 +55,33 @@ routes.get('/api/route/status', async (c) => {
   }
 
   const upstreams = await upstream.getUpstreams()
+  const probes = new AbortController()
   try {
     let hasWinner = false
     return await Promise.any(
       upstreams.map(async (upstream) => {
         const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
+        const signal = AbortSignal.any([
+          AbortSignal.timeout(5000),
+          probes.signal,
+        ])
         const res = await proxy(statusUrl, {
-          signal: AbortSignal.timeout(5000),
+          signal,
         })
-        // 在任何 await 之前确定唯一获胜者，避免同时成功的多个响应都保留正文。
-        if (res.status === 200 && !hasWinner) {
+        const status = await readCacheStatus(res)
+        // 完成正文校验后同步确定唯一获胜者；其余请求及正文读取立即取消。
+        if (status && !hasWinner) {
           hasWinner = true
-          return res
+          probes.abort()
+          return c.json(status)
         }
-        // 已返回的失败响应和多余成功响应不再转发，立即释放正文。
-        await cancelResponseBody(res)
-        throw new Error(`${res.status}`)
+        throw new Error('Unconfirmed cache status')
       }),
     )
   } catch {
     return c.json({ cached: false, lastBuildDate: null }, 404)
+  } finally {
+    probes.abort()
   }
 })
 
