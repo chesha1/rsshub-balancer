@@ -1,10 +1,16 @@
 import { Hono } from 'hono'
-import { proxy } from 'hono/proxy'
 import { readCacheStatus } from './cache-status'
+import { checkUpstreamHealth } from './health'
+import { upstreamLogger } from './log'
 import * as metrics from './metrics'
 import { internalRoutes } from './routes/internal'
 import * as upstream from './upstream'
-import { cancelResponseBody, isLocalResourcePath } from './utils'
+import {
+  getUpstreamDiagnosticRuntime,
+  reportUpstreamIssue,
+  safeDiagnosticError,
+} from './upstream-observability'
+import { isLocalResourcePath } from './utils'
 
 // 统一注册一批明确不对外提供的路由，避免下面散落多条重复的 notFound 声明。
 // 本站资源（/_assets 目录与根目录静态文件）由代理入口通过 isLocalResourcePath() 统一判断，不在这里重复声明。
@@ -19,29 +25,61 @@ const notFoundRoutes = [
 const publicProxyAllowedMethods = new Set(['GET', 'HEAD'])
 const PUBLIC_PROXY_ALLOW_HEADER = 'GET, HEAD'
 
+// 聚合查询可先得到赢家；无论诊断早到还是晚到，都只补写一次同 Request ID 的结果。
+function diagnosticCompletion(event: string) {
+  let result: { outcome: string; status: number; always: boolean } | undefined
+  let emitted = false
+  const trace = { logged: false, onLogged: emit }
+
+  // 不等待其它探测，只在结果与日志均已具备时同步输出摘要。
+  function emit(): void {
+    if (!result || emitted || (!trace.logged && !result.always)) return
+    emitted = true
+    try {
+      upstreamLogger.warn('upstream probe result', {
+        event,
+        runtime: getUpstreamDiagnosticRuntime(),
+        outcome: result.outcome,
+        status: result.status,
+        diagnosticsLogged: trace.logged,
+      })
+    } catch {
+      // 日志写入失败不能把已确认的健康或缓存结果改成失败。
+    }
+  }
+
+  return {
+    trace,
+    // 保存处理结果，迟到的诊断会通过请求局部回调关联到这里。
+    complete(outcome: string, status: number, always = false): void {
+      result = { outcome, status, always }
+      emit()
+    },
+  }
+}
+
 // 共享路由直接使用业务模块；各应用负责在挂载前注册公共中间件与平台专属路由。
 export const routes = new Hono()
 
 routes.route('/_internal', internalRoutes)
 routes.get('/healthz', async (c) => {
   const upstreams = await upstream.getUpstreams()
+  const completion = diagnosticCompletion('upstream.health_result')
   try {
     await Promise.any(
       upstreams.map(async (u) => {
-        const res = await fetch(`${u}/healthz`, {
+        const healthy = await checkUpstreamHealth(`${u}/healthz`, {
           signal: AbortSignal.timeout(5000),
+          action: 'unhealthy_probe',
+          trace: completion.trace,
         })
-        if (!res.ok) {
-          await cancelResponseBody(res)
-          throw new Error(`${res.status}`)
-        }
-        // 与定时筛选保持一致，只有健康端点返回明确的 ok 正文才算可用。
-        if ((await res.text()) !== 'ok')
-          throw new Error('Invalid health response')
+        if (!healthy) throw new Error('Invalid health response')
       }),
     )
+    completion.complete('healthy', 200)
     return c.text('ok')
   } catch {
+    completion.complete('unhealthy', 503, true)
     return c.text('unhealthy', 503)
   }
 })
@@ -56,6 +94,7 @@ routes.get('/api/route/status', async (c) => {
 
   const upstreams = await upstream.getUpstreams()
   const probes = new AbortController()
+  const completion = diagnosticCompletion('upstream.cache_status_result')
   try {
     let hasWinner = false
     return await Promise.any(
@@ -65,20 +104,43 @@ routes.get('/api/route/status', async (c) => {
           AbortSignal.timeout(5000),
           probes.signal,
         ])
-        const res = await proxy(statusUrl, {
-          signal,
-        })
-        const status = await readCacheStatus(res)
+        // 聚合返回的是重新构造的 JSON；直接 fetch 也保留最终 URL，供诊断核对来源。
+        let status: Awaited<ReturnType<typeof readCacheStatus>>
+        try {
+          const res = await fetch(statusUrl, { signal })
+          status = await readCacheStatus(res, statusUrl, {
+            signal,
+            trace: completion.trace,
+          })
+        } catch (error) {
+          // 聚合获胜后的主动取消无需告警；实际连接失败和超时才记录。
+          if (!probes.signal.aborted) {
+            const failure = safeDiagnosticError(error, signal)
+            await reportUpstreamIssue({
+              url: statusUrl,
+              stage: 'cache',
+              method: 'GET',
+              action: 'ignore_cache_hint',
+              reason: failure.failureKind,
+              error,
+              signal,
+              trace: completion.trace,
+            })
+          }
+          throw error
+        }
         // 完成正文校验后同步确定唯一获胜者；其余请求及正文读取立即取消。
         if (status && !hasWinner) {
           hasWinner = true
           probes.abort()
+          completion.complete('confirmed', 200)
           return c.json(status)
         }
         throw new Error('Unconfirmed cache status')
       }),
     )
   } catch {
+    completion.complete('unconfirmed', 404)
     return c.json({ cached: false, lastBuildDate: null }, 404)
   } finally {
     probes.abort()

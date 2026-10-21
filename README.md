@@ -44,6 +44,8 @@ https://rsshub-balancer.virworks.moe/github/repos/DIYgod/RSSHub/releases
 
 所有候选统一拒绝明确 Challenge 和 HTML 响应，随后尝试其他上游；正常 Feed 保持流式转发。缓存命中条件与响应检查规则见 [上游响应校验](docs/upstream-response-validation.md)。
 
+健康检查、缓存探测与 Feed 异常会记录结构化诊断，包含 CF 标记、HTML 标题与验证特征，并关联最终处理结果。同类问题限频记录，可用 `pnpm logs:upstream` 汇总现有日志，具体见[上游异常日志与回看](docs/upstream-observability.md)。
+
 Origin 和 Edge 分别维护实例列表与失败标记。这里的失败避让作用于 RSSHub 上游，与 Watchdog 在 Origin 和 Edge 之间切换入口是两件事。
 
 ### 首页状态与流量观测

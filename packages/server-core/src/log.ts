@@ -16,6 +16,8 @@ type RequestLogContext = {
   requestId: string
   requestMethod: string
   requestPath: string
+  requestQueryKeys?: string[]
+  requestFormat?: string
 }
 
 const jsonLinesFormatter = getJsonLinesFormatter()

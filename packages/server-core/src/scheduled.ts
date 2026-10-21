@@ -1,12 +1,19 @@
 import { config } from './config'
+import { checkUpstreamHealth } from './health'
 import { cronLogger } from './log'
 import * as redis from './redis'
 import * as upstream from './upstream'
-import { cancelResponseBody, trimSlash } from './utils'
+import {
+  getUpstreamDiagnosticRuntime,
+  safeDiagnosticUrl,
+} from './upstream-observability'
+import { trimSlash } from './utils'
 
 // 定时刷新远程 RSSHub 实例列表，健康检查通过后写入 Redis 和本地缓存。
 export async function scheduled(): Promise<void> {
   const startedAt = Date.now()
+  const requestId = crypto.randomUUID()
+  const trace = { logged: false }
   let previous: string[] = []
   try {
     try {
@@ -19,22 +26,15 @@ export async function scheduled(): Promise<void> {
     ])
     // 并行健康检查，只保留可用实例
     const checks = await Promise.all(
-      merged.map(async (u) => {
-        try {
-          const res = await fetch(`${u}/healthz`, {
-            signal: AbortSignal.timeout(5000),
-            redirect: 'manual',
-          })
-          if (!res.ok) {
-            await cancelResponseBody(res)
-            return false
-          }
-          // 读取正文也受同一个超时信号约束，避免把返回 2xx 的失效站点当作健康实例。
-          return (await res.text()) === 'ok'
-        } catch {
-          return false
-        }
-      }),
+      merged.map((u) =>
+        checkUpstreamHealth(`${u}/healthz`, {
+          signal: AbortSignal.timeout(5000),
+          redirect: 'manual',
+          action: 'exclude_from_refresh',
+          trace,
+          requestId,
+        }),
+      ),
     )
     const healthy = merged.filter((_, i) => checks[i])
     const previousSet = new Set(previous)
@@ -44,6 +44,8 @@ export async function scheduled(): Promise<void> {
     if (healthy.length === 0) {
       cronLogger.warn('scheduled refresh found no healthy upstreams', {
         event: 'cron.refresh',
+        runtime: getUpstreamDiagnosticRuntime(),
+        requestId,
         outcome: 'retain_existing',
         remoteCount: remote.length,
         mergedCount: merged.length,
@@ -55,20 +57,38 @@ export async function scheduled(): Promise<void> {
     }
     await redis.setInstances(healthy)
     upstream.cacheInstances(healthy)
-    cronLogger.info('scheduled refresh updated upstream instances', {
+    // 有异常样本时保留同一关联 ID 的刷新结果，便于确认实例最终是否被移除。
+    const summary = {
       event: 'cron.refresh',
+      runtime: getUpstreamDiagnosticRuntime(),
+      requestId,
       outcome: 'updated',
       remoteCount: remote.length,
       mergedCount: merged.length,
       healthyCount: healthy.length,
       previousCount: previous.length,
-      addedHosts,
-      removedHosts,
+      addedHosts: addedHosts.map(safeDiagnosticUrl),
+      removedHosts: removedHosts.map(safeDiagnosticUrl),
+      diagnosticsLogged: trace.logged,
       durationMs: Date.now() - startedAt,
-    })
+    }
+    if (trace.logged) {
+      try {
+        cronLogger.warn(
+          'scheduled refresh completed with upstream diagnostics',
+          summary,
+        )
+      } catch {
+        // 上游列表已经刷新成功，诊断输出失败不应被记成刷新失败。
+      }
+    } else {
+      cronLogger.info('scheduled refresh updated upstream instances', summary)
+    }
   } catch (e) {
     cronLogger.warn('scheduled refresh failed; keeping existing instances', {
       event: 'cron.refresh',
+      runtime: getUpstreamDiagnosticRuntime(),
+      requestId,
       outcome: 'retain_existing',
       previousCount: previous.length,
       durationMs: Date.now() - startedAt,

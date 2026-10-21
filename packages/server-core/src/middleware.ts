@@ -42,11 +42,22 @@ export function registerCommonMiddleware<E extends Env>(app: Hono<E>): void {
   app.use(async (c, next) => {
     const requestId = c.get('requestId')
     const url = new URL(c.req.url)
+    const format = url.searchParams.get('format')
     await withRequestLogContext(
       {
         requestId,
         requestMethod: c.req.method,
-        requestPath: url.pathname + url.search,
+        // 查询参数可能携带访问凭据；保留参数名和常用格式值即可定位请求类型。
+        requestPath: url.pathname,
+        requestQueryKeys: [...new Set(url.searchParams.keys())]
+          .slice(0, 16)
+          .map((name) => name.slice(0, 64)),
+        requestFormat:
+          format && ['rss', 'atom', 'json'].includes(format)
+            ? format
+            : format === null
+              ? undefined
+              : 'other',
       },
       next,
     )

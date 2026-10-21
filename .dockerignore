@@ -7,5 +7,6 @@
 .agents
 .codex
 .nx
+.diagnostics
 dist
 docs

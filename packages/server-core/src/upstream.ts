@@ -3,6 +3,12 @@ import { readCacheStatus } from './cache-status'
 import { config } from './config'
 import { upstreamLogger, withRequestId } from './log'
 import * as redis from './redis'
+import {
+  getUpstreamDiagnosticRuntime,
+  reportUpstreamIssue,
+  safeDiagnosticError,
+  safeDiagnosticUrl,
+} from './upstream-observability'
 import { cancelResponseBody, shuffle, trimSlash } from './utils'
 
 // `forward` 表示当前尝试正好命中了缓存探测选出的上游；
@@ -164,6 +170,17 @@ async function markFailedUpstream(
   }
 }
 
+// 保留重定向拒绝的固定原因和响应头，外层统一记一次日志并执行原有回退。
+class UpstreamRedirectError extends Error {
+  // 响应体已释放，只保留用于排查跳转的状态和头部。
+  constructor(
+    readonly reason: string,
+    readonly response: Response,
+  ) {
+    super('Upstream redirect cannot be followed')
+  }
+}
+
 // 作为 proxy 的 customFetch，在同一个上游内跟随重定向，返回最终响应供选路判断成败。
 // 各上游的 RSSHub 版本可能不同，同一组路由在不同版本之间可能互相重定向，所以只在发出重定向的上游内跟随。
 // RSSHub 的 Feed 路由只做站内重定向，跳到其他站点通常是实例的授权流程、域名迁移或失效，
@@ -191,7 +208,14 @@ async function fetchWithinUpstream(request: Request): Promise<Response> {
       next.origin !== origin ||
       redirectCount >= MAX_UPSTREAM_REDIRECTS
     ) {
-      throw new Error('Upstream redirect cannot be followed')
+      throw new UpstreamRedirectError(
+        next === null
+          ? 'redirect_missing_or_invalid'
+          : next.origin !== origin
+            ? 'redirect_cross_origin'
+            : 'redirect_limit',
+        res,
+      )
     }
     current = new Request(next, {
       method: current.method,
@@ -247,6 +271,7 @@ export async function fetchFromUpstream(
   let forwardAttemptCount = 0
   let fallbackAttemptCount = 0
   const attemptedUpstreams: string[] = []
+  const diagnostics = { logged: false }
   let finalAttemptKind: UpstreamAttemptKind | undefined
   let selectedUpstreamHost: string | undefined
   let finalUpstreamHost: string | undefined
@@ -262,6 +287,7 @@ export async function fetchFromUpstream(
       prepareDurationMs = Date.now() - startedAt
       upstreamLogger.error('no upstream instances available; skipping fetch', {
         event: 'upstream.fetch',
+        runtime: getUpstreamDiagnosticRuntime(),
         outcome: 'no_upstreams',
         status: 502,
         durationMs: Date.now() - startedAt,
@@ -294,6 +320,7 @@ export async function fetchFromUpstream(
       prepareDurationMs = Date.now() - startedAt
       upstreamLogger.error('all upstreams marked failed; skipping fetch', {
         event: 'upstream.fetch',
+        runtime: getUpstreamDiagnosticRuntime(),
         outcome: 'all_marked_failed',
         status: 502,
         durationMs: Date.now() - startedAt,
@@ -322,10 +349,30 @@ export async function fetchFromUpstream(
       orderedUpstreams.map(async (upstream) => {
         const statusUrl = `${upstream}/api/route/status?requestPath=${encodeURIComponent(requestPath)}`
         const signal = AbortSignal.timeout(1000)
-        const check = await fetch(statusUrl, { signal })
-        // 连接和 JSON 正文读取共用请求的 1 秒超时；异常不排除实际转发。
-        const status = await readCacheStatus(check)
-        return status ? upstream : undefined
+        const probeStartedAt = Date.now()
+        try {
+          const check = await fetch(statusUrl, { signal })
+          // 连接和 JSON 正文读取共用请求的 1 秒超时；异常不排除实际转发。
+          const status = await readCacheStatus(check, statusUrl, {
+            signal,
+            trace: diagnostics,
+          })
+          return status ? upstream : undefined
+        } catch (error) {
+          const failure = safeDiagnosticError(error, signal)
+          await reportUpstreamIssue({
+            url: statusUrl,
+            stage: 'cache',
+            method: 'GET',
+            reason: failure.failureKind,
+            action: 'ignore_cache_hint',
+            error,
+            signal,
+            trace: diagnostics,
+            durationMs: Date.now() - probeStartedAt,
+          })
+          return undefined
+        }
       }),
     )
     const hitUpstreams = new Set<string>()
@@ -377,12 +424,14 @@ export async function fetchFromUpstream(
         fallbackAttemptCount += 1
       }
       let failureTtl = config.failTtl
+      const attemptStartedAt = Date.now()
+      const signal = AbortSignal.timeout(15000)
       try {
         let originalResponse: Response | undefined
         const res = await proxy(upstream + requestPath, {
           raw: tracedRequest,
           redirect: 'manual',
-          signal: AbortSignal.timeout(15000),
+          signal,
           // 保存原始响应头，避免 proxy 按 Connection 清理头部后丢失 Challenge 或 HTML 标记。
           customFetch: async (request) => {
             originalResponse = await fetchWithinUpstream(request)
@@ -393,21 +442,24 @@ export async function fetchFromUpstream(
         const rejectionReason = responseRejectionReason(checkedResponse)
         if (rejectionReason) {
           failureTtl = config.invalidResponseTtl
-          upstreamLogger.warn(
-            'upstream response rejected; trying next upstream',
-            {
-              event: 'upstream.response_rejected',
-              upstream,
-              status: res.status,
-              contentType: checkedResponse.headers.get('content-type'),
-              reason: rejectionReason,
-              ttlSeconds: failureTtl,
-            },
-          )
+          // 原始头用于识别，正文交给限时诊断后仍按原有规则回退；不克隆正常 Feed。
+          await reportUpstreamIssue({
+            url: upstream + requestPath,
+            response: checkedResponse,
+            stage: 'feed',
+            method: tracedRequest.method,
+            action: 'try_next_upstream',
+            reason: rejectionReason,
+            ttlSeconds: failureTtl,
+            durationMs: Date.now() - attemptStartedAt,
+            signal,
+            trace: diagnostics,
+          })
         } else if (res.status >= 200 && res.status < 400) {
           fetchDurationMs = Date.now() - fetchStartedAt
-          upstreamLogger.info('upstream fetch completed', {
+          const summary = {
             event: 'upstream.fetch',
+            runtime: getUpstreamDiagnosticRuntime(),
             outcome:
               finalAttemptKind === 'forward'
                 ? 'forward_succeeded'
@@ -423,21 +475,70 @@ export async function fetchFromUpstream(
             retryCount: Math.max(attemptCount - 1, 0),
             forwardAttemptCount,
             fallbackAttemptCount,
-            attemptedUpstreams,
+            attemptedUpstreams: attemptedUpstreams.map(safeDiagnosticUrl),
             finalAttemptKind,
             cacheHit,
-            selectedUpstreamHost,
-            finalUpstreamHost,
+            selectedUpstreamHost: selectedUpstreamHost
+              ? safeDiagnosticUrl(selectedUpstreamHost)
+              : undefined,
+            finalUpstreamHost: safeDiagnosticUrl(finalUpstreamHost),
             fallbackUsed: fallbackAttemptCount > 0,
-          })
+            diagnosticsLogged: diagnostics.logged,
+          }
+          // 被采样的异常与最终成功使用同一 Request ID，避免恢复信息被 info 级别过滤。
+          if (diagnostics.logged) {
+            try {
+              upstreamLogger.warn(
+                'upstream fetch completed after diagnostics',
+                summary,
+              )
+            } catch {
+              // 摘要输出失败不能让已成功的上游重新进入失败和换源流程。
+            }
+          } else {
+            upstreamLogger.info('upstream fetch completed', summary)
+          }
           return {
             response: res,
             upstream: finalUpstreamHost,
           }
+        } else {
+          await reportUpstreamIssue({
+            url: upstream + requestPath,
+            response: checkedResponse,
+            stage: 'feed',
+            method: tracedRequest.method,
+            action: 'try_next_upstream',
+            reason: 'http_error',
+            ttlSeconds: failureTtl,
+            durationMs: Date.now() - attemptStartedAt,
+            signal,
+            trace: diagnostics,
+          })
         }
         // 失败响应不会转发，先释放正文再标记失败并尝试下一个上游。
         await cancelResponseBody(res)
-      } catch {}
+      } catch (error) {
+        const failure = safeDiagnosticError(error, signal)
+        await reportUpstreamIssue({
+          url: upstream + requestPath,
+          response:
+            error instanceof UpstreamRedirectError ? error.response : undefined,
+          stage: 'feed',
+          method: tracedRequest.method,
+          action: 'try_next_upstream',
+          reason:
+            error instanceof UpstreamRedirectError
+              ? error.reason
+              : failure.failureKind,
+          sampleBody: false,
+          error,
+          signal,
+          ttlSeconds: failureTtl,
+          durationMs: Date.now() - attemptStartedAt,
+          trace: diagnostics,
+        })
+      }
       // 仅在当前路由尚未标记该上游失败时才写入，减少重复 Redis 写入。
       if (!failedUpstreams.has(upstream)) {
         failedUpstreams.add(upstream)
@@ -450,6 +551,7 @@ export async function fetchFromUpstream(
     fetchDurationMs = Date.now() - fetchStartedAt
     upstreamLogger.error('upstream fetch failed', {
       event: 'upstream.fetch',
+      runtime: getUpstreamDiagnosticRuntime(),
       outcome: 'all_failed',
       status: 502,
       durationMs: Date.now() - startedAt,
@@ -460,11 +562,15 @@ export async function fetchFromUpstream(
       retryCount: Math.max(attemptCount - 1, 0),
       forwardAttemptCount,
       fallbackAttemptCount,
-      attemptedUpstreams,
+      attemptedUpstreams: attemptedUpstreams.map(safeDiagnosticUrl),
       finalAttemptKind,
       cacheHit,
-      selectedUpstreamHost,
-      finalUpstreamHost,
+      selectedUpstreamHost: selectedUpstreamHost
+        ? safeDiagnosticUrl(selectedUpstreamHost)
+        : undefined,
+      finalUpstreamHost: finalUpstreamHost
+        ? safeDiagnosticUrl(finalUpstreamHost)
+        : undefined,
       fallbackUsed: fallbackAttemptCount > 0,
     })
     return {
@@ -483,6 +589,7 @@ export async function fetchFromUpstream(
     }
     upstreamLogger.error('upstream fetch raised an unexpected error', {
       event: 'upstream.fetch',
+      runtime: getUpstreamDiagnosticRuntime(),
       outcome: 'error',
       phase,
       status: 502,
@@ -498,10 +605,14 @@ export async function fetchFromUpstream(
       retryCount: Math.max(attemptCount - 1, 0),
       forwardAttemptCount,
       fallbackAttemptCount,
-      attemptedUpstreams,
+      attemptedUpstreams: attemptedUpstreams.map(safeDiagnosticUrl),
       finalAttemptKind,
-      selectedUpstreamHost,
-      finalUpstreamHost,
+      selectedUpstreamHost: selectedUpstreamHost
+        ? safeDiagnosticUrl(selectedUpstreamHost)
+        : undefined,
+      finalUpstreamHost: finalUpstreamHost
+        ? safeDiagnosticUrl(finalUpstreamHost)
+        : undefined,
       fallbackUsed: fallbackAttemptCount > 0,
       error: e,
     })

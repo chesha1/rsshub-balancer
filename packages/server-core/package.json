@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./log": "./src/log.ts",
+    "./upstream-observability": "./src/upstream-observability.ts",
     "./redis": "./src/redis.ts",
     "./metrics": "./src/metrics.ts",
     "./metrics-schema": "./src/metrics-schema.ts"

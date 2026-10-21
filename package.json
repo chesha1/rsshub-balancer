@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "logs:upstream": "node scripts/upstream-log-summary.mjs",
     "dev:edge": "NX_LOAD_DOT_ENV_FILES=false NX_RUN_COMMANDS_DIRECTLY=false NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run @rsshub-balancer/edge:dev",
     "dev:origin": "NX_LOAD_DOT_ENV_FILES=false NX_RUN_COMMANDS_DIRECTLY=false NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run @rsshub-balancer/origin:dev",
     "dev:web": "NX_LOAD_DOT_ENV_FILES=false NX_RUN_COMMANDS_DIRECTLY=false NX_ISOLATE_PLUGINS=false NX_DAEMON=false nx run @rsshub-balancer/web:dev",
